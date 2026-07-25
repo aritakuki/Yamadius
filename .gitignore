@@ -1,0 +1,40 @@
+# Haskell build products
+*.hi
+*.o
+
+# Native build products
+*.a
+*.so
+*.dylib
+*.dll
+/Main
+
+# CMake build products
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# Generated GLFW sample/test executables
+/external/glfw-3.1.2/examples/boing
+/external/glfw-3.1.2/examples/gears
+/external/glfw-3.1.2/examples/heightmap
+/external/glfw-3.1.2/examples/particles
+/external/glfw-3.1.2/examples/simple
+/external/glfw-3.1.2/examples/splitview
+/external/glfw-3.1.2/examples/wave
+/external/glfw-3.1.2/tests/clipboard
+/external/glfw-3.1.2/tests/cursor
+/external/glfw-3.1.2/tests/empty
+/external/glfw-3.1.2/tests/events
+/external/glfw-3.1.2/tests/gamma
+/external/glfw-3.1.2/tests/glfwinfo
+/external/glfw-3.1.2/tests/iconify
+/external/glfw-3.1.2/tests/joysticks
+/external/glfw-3.1.2/tests/monitors
+/external/glfw-3.1.2/tests/msaa
+/external/glfw-3.1.2/tests/reopen
+/external/glfw-3.1.2/tests/sharing
+/external/glfw-3.1.2/tests/tearing
+/external/glfw-3.1.2/tests/threads
+/external/glfw-3.1.2/tests/title
+/external/glfw-3.1.2/tests/windows
