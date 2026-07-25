@@ -507,7 +507,7 @@ freshFlyer = Flyer{tag=Nothing,position=0:+0,velocity=(-3):+0,hitDisp=Circular 0
 freshInterceptor = freshFlyer{mode=1,velocity = 0:+0}
 freshOption = Option{tag = Nothing, position=0:+0, hitDisp = Circular (0:+0) 0,optionTag = 0,reloadTime=0,weaponEnergy=100}
 freshPowerUpCapsule = PowerUpCapsule{tag = Nothing, hitDisp = Circular (0:+0) 30,position = 0:+0,hp=1,age=0}
-freshPowerUpGauge = PowerUpGauge{tag=Nothing, position = (-300):+(-240)}
+freshPowerUpGauge = PowerUpGauge{tag=Nothing, position = 20:+0}
 freshShield = Shield{tag=Nothing,position=380:+0,hitDisp=Circular (0:+0) 0,hitDispLand=Circular (0:+0) 0,hp=shieldMaxHp,settled=False,size=0,placement=0:+0,angle=0,omega=0}
 freshStalk = freshFlyer{mode=10,velocity = (-2):+0}
 freshStandardLaser = StandardLaser{tag=Nothing,position=0:+0,hitDisp=Rectangular (laserSpeed/(-2):+(-laserBreadth)) (laserSpeed/2:+laserBreadth),hitDispLand = Rectangular (laserSpeed/(-2):+(-vicViperSize)) (laserSpeed/2:+vicViperSize),velocity=laserSpeed:+0,hp=1,parentTag=0,age=0}
@@ -1408,28 +1408,92 @@ newParticles n p v= do
 renderMonadius :: [GL.TextureObject] -> [Key] -> Monadius -> IO ()
 renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   putDebugStrLn $ show $ length objects
-  mapM_ renderGameObject objects
+  Size clientWidth clientHeight <- get windowSize
+  let (stageX,stageY,stageWidth,stageHeight,hudHeight) = hudLayout clientWidth clientHeight
+  -- Keep a 4:3 stage and add the HUD below it; both scale with the window.
+  viewport $= (Position (fromIntegral stageX) (fromIntegral stageY),
+               Size (fromIntegral stageWidth) (fromIntegral stageHeight))
+  -- Solid corridor panels form the backdrop.  Drawing them first prevents
+  -- their faces from covering ships, shots, and the foreground UI.
+  mapM_ renderGameObject $ filter isLandscape objects
+  mapM_ renderGameObject $ filter (not . isGauge) $ filter (not . isLandscape) objects
+  -- Particles leave an additive blend equation active.  With that equation a
+  -- black source contributes nothing, so restore ordinary alpha compositing
+  -- before drawing the opaque HUD backing.
+  blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
+  depthFunc $= Just Less
+  depthFunc $= Just Always
+  -- Color3 leaves the alpha component from the preceding object intact.
+  -- Shields render with a translucent Color4, so the HUD backing must set
+  -- alpha explicitly or it can become invisible.
+  color (Color4 0 0 0 (1 :: GLdouble))
+  matrixMode $= Projection
+  loadIdentity
+  ortho2D 0 640 0 (fromIntegral hudHeight)
+  matrixMode $= Modelview 0
+  loadIdentity
+  viewport $= (Position 0 0, Size clientWidth (fromIntegral hudHeight))
+  -- Independent HUD strip below the stage: gauge row above, scores below.
+  renderQuad 0 0 640 90
+  mapM_ renderGameObject $ filter isGauge objects
   preservingMatrix $ do
-    translate (Vector3 (-300) (220) (0 :: GLdouble))
+    translate (Vector3 30 15 (0 :: GLdouble))
     renderWithShade (Color3 1 1 (1 :: GLdouble)) (Color3 0 0 (1 :: GLdouble)) $ do
-      scale (0.2 :: GLdouble) 0.2 0.2
+      scale (0.12 :: GLdouble) 0.12 0.12
       renderString MonoRoman scoreStr
   preservingMatrix $ do
-    translate (Vector3 (0) (220) (0 :: GLdouble))
+    translate (Vector3 330 15 (0 :: GLdouble))
     renderWithShade (Color3 1 1 (1 :: GLdouble)) (Color3 0 0 (1 :: GLdouble)) $ do
-      scale (0.2 :: GLdouble) 0.2 0.2
+      scale (0.12 :: GLdouble) 0.12 0.12
       renderString MonoRoman scoreStr2
+  depthFunc $= Just Less
+  matrixMode $= Projection
+  loadIdentity
+  perspective 30.0 (fromIntegral stageWidth / fromIntegral stageHeight) 600 1400
+  lookAt (Vertex3 0 0 (927 :: GLdouble)) (Vertex3 0 0 (0 :: GLdouble)) (Vector3 0 1 (0 :: GLdouble))
+  matrixMode $= Modelview 0
+  loadIdentity
+  viewport $= (Position (fromIntegral stageX) (fromIntegral stageY),
+               Size (fromIntegral stageWidth) (fromIntegral stageHeight))
   where
   scoreStr = "1P "  ++ ((padding '0' 8).show.totalScore) variables
   scoreStr2 = if isNothing $ playTitle variables then "HI "++((padding '0' 8).show.hiScore) variables else (fromJust $ playTitle variables)
 
   gameclock = gameClock variables
 
+  isLandscape :: GameObject -> Bool
+  isLandscape LandScapeBlock{} = True
+  isLandscape _                = False
+
+  isGauge :: GameObject -> Bool
+  isGauge PowerUpGauge{} = True
+  isGauge _              = False
+
+  hudLayout :: GLsizei -> GLsizei -> (Int,Int,Int,Int,Int)
+  hudLayout width height = (stageLeft, hudPixels,
+                            stagePixels * 4 `div` 3, stagePixels, hudPixels)
+    where
+      fullWidth = fromIntegral width
+      fullHeight = fromIntegral height
+      minimumHudPixels = 90
+      availableHeight = max 1 (fullHeight - minimumHudPixels)
+      stagePixels = min availableHeight (fullWidth * 3 `div` 4)
+      hudPixels = fullHeight - stagePixels
+      stageLeft = (fullWidth - stagePixels * 4 `div` 3) `div` 2
+
   -- returns an IO monad that can render the object.
   renderGameObject :: GameObject -> IO ()
   renderGameObject gauge@PowerUpGauge{} = preservingMatrix $ do
     let x:+y = position gauge
-    translate (Vector3 x y 0)
+    Size clientWidth clientHeight <- get windowSize
+    let (_,_,_,_,currentHudHeight) = hudLayout clientWidth clientHeight
+    blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
+    depthFunc $= Just Always
+    translate (Vector3 x (fromIntegral currentHudHeight - 35) 0)
+    color (Color4 0 0 0 (1 :: GLdouble))
+    renderQuad (-5) (-5) 535 25
+    color (Color3 0.12 0.18 (0.35 :: GLdouble))
+    renderOutline (-5) (-5) 535 25 1
     color (Color3 (1.0 :: GLdouble) 1.0 1.0)
     mapM_ (\(i,j) -> (if(i==activeGauge)then renderActive else renderNormal) j (isLimit i) i) $
       zip [0..5] [0,90..450] where
@@ -1696,16 +1760,9 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
       hpRate = (intToGLdouble $ hp me)/(intToGLdouble hatchHP)
 
   renderGameObject LandScapeBlock{position=pos,hitDisp=hd} = preservingMatrix $ do
-    color (Color3 0.6 0.2 0 :: Color3 GLdouble)
-    renderShape pos hd
-    if treasure!!(baseGameLevel variables) then do
-      color (Color3 0.7 0.23 0 :: Color3 GLdouble)
-      translate (Vector3 0 0 (60 :: GLdouble))
-      renderShape pos hd
-      color (Color3 0.5 0.17 0 :: Color3 GLdouble)
-      translate (Vector3 0 0 (-120 :: GLdouble))
-      renderShape pos hd
-     else return()
+    -- Keep the collision shape unchanged, but render it as a constructed
+    -- metal corridor: recessed steel, gold ribs, and a cool-blue inner rim.
+    renderMetalLandscape pos hd
 
   renderGameObject me@Particle{position = x:+y,particleColor=Color3 mr mg mb} = preservingMatrix $ do
     if age me>=0 then do
@@ -1821,6 +1878,53 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
       scale r r 1
       renderPrimitive LineLoop $ vertices2D 0 $ map (\t -> (cos(2/7*t*pi),sin(2/7*t*pi))) [0..6]
     Shapes{children=cs} -> mapM_ (renderShape (x:+y)) cs
+
+  renderMetalLandscape :: Complex GLdouble -> Shape -> IO ()
+  renderMetalLandscape (x:+y) s = case s of
+    Rectangular{bottomLeft = (l:+b), topRight = (r:+t)} ->
+      renderMetalPanel (x+l) (y+b) (x+r) (y+t)
+    Shapes{children=cs} -> mapM_ (renderMetalLandscape (x:+y)) cs
+    Circular{} -> renderShape (x:+y) s
+
+  renderMetalPanel :: GLdouble -> GLdouble -> GLdouble -> GLdouble -> IO ()
+  renderMetalPanel l b r t = do
+    -- The dark inset makes the wall read as a solid mass against the stars.
+    color (Color3 0.075 0.055 0.045 :: Color3 GLdouble)
+    renderQuad l b r t
+    color (Color3 0.20 0.11 0.025 :: Color3 GLdouble)
+    renderQuad (l+3) (b+3) (r-3) (t-3)
+
+    -- Repeated gold structural ribs give long scrolling walls a machine-made
+    -- rhythm while staying clipped to each existing collision rectangle.
+    mapM_ renderRib [l+14,l+42..r-12]
+    color (Color3 0.95 0.55 0.08 :: Color3 GLdouble)
+    mapM_ (\yy -> renderQuad (l+4) (yy-1) (r-4) (yy+1)) [b+11,b+31..t-7]
+
+    -- Purple-blue trim marks the playable edge, echoing the reference's
+    -- illuminated conduit around the black flight corridor.
+    color (Color3 0.17 0.16 0.42 :: Color3 GLdouble)
+    renderOutline l b r t 5
+    color (Color3 0.38 0.85 0.95 :: Color3 GLdouble)
+    renderOutline (l+3) (b+3) (r-3) (t-3) 2
+    color (Color3 1.0 0.78 0.25 :: Color3 GLdouble)
+    renderLights [l+18,l+54..r-12]
+    where
+      renderRib xx = do
+        color (Color3 0.36 0.18 0.025 :: Color3 GLdouble)
+        renderQuad (xx-5) (b+4) (xx+5) (t-4)
+        color (Color3 0.90 0.45 0.05 :: Color3 GLdouble)
+        renderQuad (xx-2) (b+5) (xx+2) (t-5)
+      renderLights xs = mapM_ (\xx -> renderQuad (xx-3) (t-8) (xx+3) (t-4)) xs
+
+  renderQuad :: GLdouble -> GLdouble -> GLdouble -> GLdouble -> IO ()
+  renderQuad l b r t =
+    renderPrimitive Quads $ vertices2D 0 [(l,b),(r,b),(r,t),(l,t)]
+
+  renderOutline :: GLdouble -> GLdouble -> GLdouble -> GLdouble -> GLdouble -> IO ()
+  renderOutline l b r t width = do
+    lineWidth $= realToFrac width
+    renderPrimitive LineLoop $ vertices2D 0 [(l,b),(l,t),(r,t),(r,b)]
+    lineWidth $= 1
 
 
   renderWithShade :: ColorComponent a=>Color3 a -> Color3 a -> IO () -> IO ()
