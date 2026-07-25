@@ -1,3 +1,5 @@
+{-# LANGUAGE ForeignFunctionInterface #-}
+
 module Monadius (
   Monadius(..),
   initialMonadius,
@@ -21,10 +23,12 @@ import           Graphics.Rendering.OpenGL.GLU
 import           Graphics.UI.GLUT                hiding (Bitmap, position)
 
 import           Control.Monad
+import           Control.Concurrent             (forkIO, threadDelay)
 import           Data.IORef
 import qualified Data.Map                        as Map
 import qualified Data.Set                        as Set
 import           System.Environment
+import           System.IO.Unsafe               (unsafePerformIO)
 import           System.Random
 
 import           Game
@@ -37,11 +41,20 @@ import           Data.Array.Repa                 as R hiding (Array, Shape, map,
 import qualified Data.Array.Repa.Repr.ForeignPtr as RF
 import           Data.Word
 import           Foreign.ForeignPtr
+import           Foreign.C.Types             (CInt (..))
 import qualified Graphics.Rendering.OpenGL.GL    as GL
 import           System.Exit                     (ExitCode (ExitSuccess),
                                                   exitFailure, exitWith)
 import           Unsafe.Coerce
 
+foreign import ccall "_Z16restartEffekseeri" c_restartEffeksser :: CInt -> IO ()
+
+-- Remaining effect variants in the current seven-effect cycle.  This is
+-- deliberately separate from the game state so replay/save data stays in its
+-- existing format.
+forceFieldEffectPool :: IORef [Int]
+{-# NOINLINE forceFieldEffectPool #-}
+forceFieldEffectPool = unsafePerformIO $ newIORef [0 .. 6]
 
 type Point= Vertex3 GLdouble
 
@@ -564,11 +577,11 @@ updateMonadius realKeys (Monadius (variables,objects))
    -- almost all operation dies when vicViper dies. use realKeys to fetch unaffected keystates.
 
   (newNextTag,newObjects) = issueTag (nextTag variables) $
-                            (loadObjects ++) $
+                            (loadObjectsForFrame ++) $
                             filterJust.map scroll $
                             concatMap updateGameObject $
                             gameObjectsAfterCollision
-  gameObjectsAfterCollision = collide objects
+  gameObjectsAfterCollision = collide objectsAfterForceField
   -- * collision must be done BEFORE updateGameObject(moving), for
   --   players would like to see the moment of collision.
   -- * loading new objects after collision and moving is nice idea, since
@@ -576,6 +589,31 @@ updateMonadius realKeys (Monadius (variables,objects))
   -- * however, some operation would like to refer the result of the collision
   --   before it is actually taken effect in updateGameObject.
   --   such routine should use gameObjectsAfterCollision.
+
+  -- A shield activation is also the trigger for the imported visual effect.
+  -- Remove hostile objects before collision/update so the clear is immediate
+  -- and cannot damage the player on the activation frame.
+  forceFieldActivated = (powerUpButton `elem` keys) &&
+    powerUpPointer vicViper == gaugeOfShield &&
+    powerUpLevels vicViper!powerUpPointer vicViper < powerUpLimits!!powerUpPointer vicViper
+  objectsAfterForceField = if forceFieldActivated
+    then filter (not . isForceFieldTarget) objects
+    else objects
+  loadObjectsForFrame = if forceFieldActivated
+    then filter (not . isForceFieldTarget) loadObjects
+    else loadObjects
+
+  isForceFieldTarget :: GameObject -> Bool
+  isForceFieldTarget DiamondBomb{}     = True
+  isForceFieldTarget TurnGear{}        = True
+  isForceFieldTarget SquadManager{}    = True
+  isForceFieldTarget Jumper{}          = True
+  isForceFieldTarget Grashia{}         = True
+  isForceFieldTarget Ducker{}          = True
+  isForceFieldTarget Flyer{}           = True
+  isForceFieldTarget ScrambleHatch{}   = True
+  isForceFieldTarget SabbathicAgent{}  = True
+  isForceFieldTarget _                 = False
 
 
   newVariables = variables{
@@ -1348,8 +1386,8 @@ newParticles n p v= do
 --  drawing
 --
 -------------------------
-renderMonadius ::  GL.TextureObject -> [Key] -> Monadius -> IO ()
-renderMonadius tex realKeys (Monadius (variables,objects)) = do
+renderMonadius :: [Key] -> Monadius -> IO ()
+renderMonadius realKeys (Monadius (variables,objects)) = do
   putDebugStrLn $ show $ length objects
   mapM_ renderGameObject objects
   preservingMatrix $ do
@@ -1417,33 +1455,6 @@ renderMonadius tex realKeys (Monadius (variables,objects)) = do
       renderWithShade (Color3 (1.0 :: GLdouble) 0 0) (Color3 (1.0 :: GLdouble) 0.6 0.4) $ do
         renderPrimitive LineLoop $ ugoVertices2DFreq 0 1 1
           [(0,12),(8,8),(10,4),(20,0),(10,-4),(8,-8),(0,-12),(-8,-8),(-10,-4),(-20,0),(-10,4),(-8,8)]
-    else
-      preservingMatrix $ do
-      texture Texture2D $= Enabled
-      -- 表示
-      -- 描写する直前に色を指定するようだ
-      -- Color4 赤 緑 青 透明度(０で完全に透明、１で完全に不透明）
-      currentColor $= Color4 1 1 1 1
-      -- texCoord,vetexは多くの型について定義されているので
-      -- オーバーロードに関する問題を避けるために以下の関数が必要
-      let texCoord2f = texCoord :: TexCoord2 GLfloat -> IO ()
-          vertex3f = vertex :: Vertex3 GLfloat -> IO ()
-          sizeHaskari = 25 :: Float
-      translate (Vector3 x y 0)
-      -- 描画
-      renderPrimitive Quads $ do
-　　　　-- ここから
-          texCoord2f (TexCoord2 0 0)
-          vertex3f (Vertex3 (-sizeHaskari) (-sizeHaskari) 0.0)
-          -- ここまでで一つの頂点の設定（テクスチャに関するもの、場所に関するもの）
-          texCoord2f (TexCoord2 0 1)
-          vertex3f (Vertex3 (-sizeHaskari) sizeHaskari 0.0)
-          texCoord2f (TexCoord2 1 1)
-          vertex3f (Vertex3 sizeHaskari sizeHaskari 0.0)
-          texCoord2f (TexCoord2 1 0)
-          vertex3f (Vertex3 sizeHaskari (-sizeHaskari) 0.0)
-      texture Texture2D $= Disabled
-{--
     else preservingMatrix $ do
       translate (Vector3 x y 0)
       renderWithShade (Color3 (1.0 :: GLdouble) 1.0 1.0) (Color3 (0.4 :: GLdouble) 0.4 0.6) $ do
@@ -1462,7 +1473,6 @@ renderMonadius tex realKeys (Monadius (variables,objects)) = do
       renderWithShade (Color3 (0 :: GLdouble) 0 0.8) (Color3 (0.0 :: GLdouble) 0.0 0.4) $ do
         renderPrimitive LineLoop $ ugoVertices2D 0 4
           [((-36),1),((-28),5),((-24),5),((-20),1),((-20),(-1)),((-24),(-5)),((-28),(-5)),((-36),(-1))] -- backfire
---}
     where
       pishaMagnitudeX :: GLdouble
       pishaMagnitudeY :: GLdouble
@@ -1854,7 +1864,7 @@ playSeMonadius sounds ses realKeys(Monadius (variables,objects)) = do
       if powerUpPointer vicViper == gaugeOfGLdouble then playSound (double ses) else
       if powerUpPointer vicViper == gaugeOfLaser then playSound (laser ses) else
       if powerUpPointer vicViper == gaugeOfOption then playSound (option ses) else
-      if powerUpPointer vicViper == gaugeOfShield then playSound (shieldVoice ses) else
+      if powerUpPointer vicViper == gaugeOfShield then playForceFieldEffect ses else
       return ()
     else if hp vic <= 0 && ageAfterDeath vic == 0 then do
       stopMusic sounds
@@ -1933,6 +1943,42 @@ playSeMonadius sounds ses realKeys(Monadius (variables,objects)) = do
      goNextStage = gameClock variables > stageClearTime
 
   playSeGameObject _ = return ()
+
+  -- Reuse the non-voice sounds and effects assigned to F1--F6 and F12 in
+  -- rectangle_with_texture_blending.  The choice is made once per shield
+  -- activation, before the next game-state update consumes the power-up.
+  playForceFieldEffect :: SEs -> IO ()
+  playForceFieldEffect effectSounds = do
+    effectIndex <- nextForceFieldEffect
+    case effectIndex of
+      0 -> do
+        c_restartEffeksser 1
+        playSound (launchers effectSounds)
+        playSound (launcher3 effectSounds)
+      1 -> c_restartEffeksser 2  >> playSound (eftsuki effectSounds)
+      2 -> c_restartEffeksser 3  >> playSound (efatchi effectSounds)
+      3 -> c_restartEffeksser 4  >> playSound (efwarero effectSounds)
+      4 -> c_restartEffeksser 5  >> playSound (eficchimae effectSounds)
+      5 -> do
+        c_restartEffeksser 6
+        playSound (efkaze effectSounds)
+        -- EfKaze.wav is much longer than the visual effect.  Stop it when
+        -- the 240-frame Effekseer playback has finished.
+        void $ forkIO $ do
+          threadDelay (240 * 16000)
+          stopSound (efkaze effectSounds)
+      _ -> c_restartEffeksser 12 >> playSound (efopen effectSounds)
+
+  -- Select from the variants that have not appeared in this cycle.  After all
+  -- seven have appeared, the next activation begins a fresh random cycle.
+  nextForceFieldEffect :: IO Int
+  nextForceFieldEffect = do
+    remaining <- readIORef forceFieldEffectPool
+    let candidates = if null remaining then [0 .. 6] else remaining
+    selectedAt <- randomRIO (0, length candidates - 1)
+    let selected = candidates !! selectedAt
+    writeIORef forceFieldEffectPool (delete selected candidates)
+    return selected
 
   collide :: [GameObject] -> [GameObject]
   -- collide a list of GameObjects and return the result.

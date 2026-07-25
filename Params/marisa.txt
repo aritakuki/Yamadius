@@ -1,0 +1,9 @@
+18.0           // g_position-1
+0.0           // g_position-2
+15.0           // g_position-3
+6.5           // Vector3D-1
+-1.0           // Vector3D-2
+0.0           // Vector3D-3
+0.0           // Vector3D-4
+10.0           // Vector3D-5
+0.0           // Vector3D-6
