@@ -83,6 +83,25 @@ loadReplay filename = readFile filename >>= (return . read)
 -- テクスチャをファイルから読み込む
 -- 何をやっているのか未だによくわからない
 -- FreeGameのサンプルをちょっといじったもの
+loadTextureFromFile :: FilePath -> IO GL.TextureObject
+loadTextureFromFile path = do
+    content <- delay <$> (flipVertically.imgData) <$> either error id <$> (readImageRGBA path)
+    -- Repa images are laid out as (height, width, channels), while OpenGL
+    -- expects TextureSize2D width height.
+    let (Z :. height :. width :. _) = R.extent content
+    [tex] <- GL.genObjectNames 1
+    GL.textureBinding GL.Texture2D GL.$= Just tex
+    GL.textureFilter Texture2D $= ((Nearest, Nothing), Nearest)
+    fptr <- liftM RF.toForeignPtr $ R.computeP $ content
+    withForeignPtr fptr
+        $ GL.texImage2D Texture2D GL.NoProxy 0 GL.RGBA8 (GL.TextureSize2D (gsizei width) (gsizei height)) 0
+        . GL.PixelData GL.RGBA GL.UnsignedByte
+    return tex
+
+gsizei :: Int -> GL.GLsizei
+{-# INLINE gsizei #-}
+gsizei x = unsafeCoerce x
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -111,10 +130,16 @@ main = do
 
       c_initEffeksser 640 480
 
+      shieldTextures <- mapM loadTextureFromFile
+        [ "Resources/force-field-frame-0.png"
+        , "Resources/force-field-frame-1.png"
+        , "Resources/force-field-frame-2.png"
+        , "Resources/force-field-frame-3.png"
+        ]
       GL.blend $= GL.Enabled
       GL.blendFunc $= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
 
-      cp <- newIORef (openingProc ses sounds 0 0 GlobalVariables{saveState = (1,0) ,isCheat = False,
+      cp <- newIORef (openingProc shieldTextures ses sounds 0 0 GlobalVariables{saveState = (1,0) ,isCheat = False,
                                                      recorderMode=recMode,playbackKeys=keys,playbackSaveState = rss,recordSaveState=(1,0),demoIndex=0,
                                                      playBackName=repName,saveHiScore=0} keystate)
 
@@ -179,8 +204,8 @@ dispProc cp = do
 -- then returns the Scene that are to be executed in next frame.
 newtype Scene = Scene (IO Scene)
 
-openingProc :: SEs -> Sounds -> Int -> Int -> GlobalVariables -> IORef [Key] -> IO Scene
-openingProc ses sounds clock menuCursor vars ks = do
+openingProc :: [GL.TextureObject] -> SEs -> Sounds -> Int -> Int -> GlobalVariables -> IORef [Key] -> IO Scene
+openingProc shieldTextures ses sounds clock menuCursor vars ks = do
   if recorderMode vars == Playback then gameStart (fst $ playbackSaveState vars) (snd $ playbackSaveState vars) (isCheat vars) Playback vars else do
   if clock > demoStartTime then do demoStart vars else do
 
@@ -240,7 +265,7 @@ openingProc ses sounds clock menuCursor vars ks = do
        gameStart savedLevel savedArea (isCheat vars) (recorderMode vars) vars
    else if isJust $ getNumberKey keystate then
       gameStart (fromJust $ getNumberKey keystate) 0 True (recorderMode vars) vars
-    else return $ Scene $ openingProc ses sounds (clock+1) (nextCursor keystate) vars ks
+    else return $ Scene $ openingProc shieldTextures ses sounds (clock+1) (nextCursor keystate) vars ks
   where
      instructions = [("Move","Arrow Keys"),("Shot","A Key"),("Missile","A Key"),("Power Up","F Key"),("Start","Space Bar")]
      timeLimit = 30 :: Int
@@ -261,7 +286,7 @@ openingProc ses sounds clock menuCursor vars ks = do
        totalScore=0, flagGameover=False,  hiScore=saveHiScore vrs,
        nextTag=0, gameClock = savePoints!!area ,baseGameLevel = level,
        playTitle = if recordermode /= Playback then Nothing else playBackName vrs})
-       return $ Scene $ mainProc ses sounds vrs{isCheat=ischeat,recordSaveState=(level,area)} gs ks
+       return $ Scene $ mainProc shieldTextures ses sounds vrs{isCheat=ischeat,recordSaveState=(level,area)} gs ks
 
      (savedLevel,savedArea) = saveState vars
 
@@ -304,8 +329,8 @@ openingProc ses sounds clock menuCursor vars ks = do
 --     demoStartTime = if presentationMode then 480 else 1800
 --     demoStartTime = if presentationMode then 4800 else 1800
 
-endingProc :: SEs -> Sounds -> GlobalVariables -> IORef [Key] -> IORef GLdouble -> IO Scene
-endingProc ses sounds vars ks ctr= do
+endingProc :: [GL.TextureObject] -> SEs -> Sounds -> GlobalVariables -> IORef [Key] -> IORef GLdouble -> IO Scene
+endingProc shieldTextures ses sounds vars ks ctr= do
   keystate <- readIORef ks
   counter <- readIORef ctr
   modifyIORef ctr (min 2420 . (+2.0))
@@ -323,8 +348,8 @@ endingProc ses sounds vars ks ctr= do
   swapBuffers
 
   if Char ' ' `elem` keystate then do
-      return $ Scene $ openingProc ses sounds 0 1 vars ks
-   else return $ Scene $ endingProc ses sounds vars ks ctr
+      return $ Scene $ openingProc shieldTextures ses sounds 0 1 vars ks
+   else return $ Scene $ endingProc shieldTextures ses sounds vars ks ctr
 
   where
     stuffRoll = [
@@ -364,8 +389,8 @@ endingProc ses sounds vars ks ctr= do
      "",
      "    press space key"]
 
-mainProc :: SEs -> Sounds -> GlobalVariables -> IORef Recorder -> IORef [Key] -> IO Scene
-mainProc ses sounds vars gs ks = do
+mainProc :: [GL.TextureObject] -> SEs -> Sounds -> GlobalVariables -> IORef Recorder -> IORef [Key] -> IO Scene
+mainProc shieldTextures ses sounds vars gs ks = do
   keystate <- readIORef ks
   beforegamestate <- readIORef gs
   playSe sounds ses keystate beforegamestate
@@ -376,7 +401,7 @@ mainProc ses sounds vars gs ks = do
   matrixMode Graphics.UI.GLUT.$= Modelview 0
   loadIdentity
 
-  render keystate gamestate
+  render shieldTextures keystate gamestate
 
   c_procEffeksser
 
@@ -392,11 +417,11 @@ mainProc ses sounds vars gs ks = do
 
       if currentLevel>1 && (not . isCheat) vars && (mode gamestate /= Playback) then do
         backgroundMusic (bgm4 sounds)
-        return $ Scene $ endingProc ses sounds vars{saveState=currentSave,saveHiScore = currentHi} ks counter
+        return $ Scene $ endingProc shieldTextures ses sounds vars{saveState=currentSave,saveHiScore = currentHi} ks counter
        else do
          backgroundMusic (bgm0 sounds)
-         return $ Scene $ openingProc ses sounds 0 1 vars{saveState=currentSave,saveHiScore = currentHi} ks
-    else return $ Scene $ mainProc ses sounds vars{saveState=currentSave,saveHiScore = currentHi} gs ks
+         return $ Scene $ openingProc shieldTextures ses sounds 0 1 vars{saveState=currentSave,saveHiScore = currentHi} ks
+    else return $ Scene $ mainProc shieldTextures ses sounds vars{saveState=currentSave,saveHiScore = currentHi} gs ks
   where
     writeReplay vs gamestate str = do
 --      home <- getEnv "HOME"

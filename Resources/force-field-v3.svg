@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="110" viewBox="0 0 240 110">
+  <defs>
+    <radialGradient id="field" cx="48%" cy="50%" rx="50%" ry="50%">
+      <stop offset="0%" stop-color="#a8f8ff" stop-opacity="0.46"/>
+      <stop offset="43%" stop-color="#39cfff" stop-opacity="0.33"/>
+      <stop offset="76%" stop-color="#168dff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#0078ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="rear" cx="0%" cy="50%" rx="100%" ry="100%">
+      <stop offset="0%" stop-color="#eaffff" stop-opacity="0.82"/>
+      <stop offset="23%" stop-color="#41dfff" stop-opacity="0.42"/>
+      <stop offset="100%" stop-color="#00b8ff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+  <ellipse cx="124" cy="55" rx="105" ry="39" fill="url(#field)"/>
+</svg>

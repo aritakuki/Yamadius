@@ -8,6 +8,7 @@ module Recorder (
   ) where
 
 import           Game
+import qualified Graphics.Rendering.OpenGL.GL as GL
 import           Graphics.UI.GLUT
 import           Monadius
 import           Util
@@ -68,8 +69,8 @@ updateRecorder keys me = me{
   isQuitRequested = (mode me == Playback && (selfDestructButton `elem` keys || Char ' ' `elem` keys)) || isQuitRequested me
 }
 
-renderRecorder :: [Key]->Recorder -> IO ()
-renderRecorder keys me = do
+renderRecorder :: [GL.TextureObject] -> [Key]->Recorder -> IO ()
+renderRecorder textures keys me = do
   (putDebugStrLn.show.mode) me
   if age me==0 || mode me /= Record then return () else preservingMatrix $ do
     translate (Vector3 300 (-230) (0::GLdouble))
@@ -77,7 +78,7 @@ renderRecorder keys me = do
     color (Color3 0.4  0.4 (0.4 :: GLdouble))
     renderString Roman $ show $ (head.preEncodedKeyBuf) me
 
-  render keys $ gameBody me
+  render textures keys $ gameBody me
 
 recorderIsGameover :: Recorder -> Bool
 recorderIsGameover me = (isGameover . gameBody) me || isQuitRequested me

@@ -23,8 +23,7 @@ import           Graphics.Rendering.OpenGL.GLU
 import           Graphics.UI.GLUT                hiding (Bitmap, position)
 
 import           Control.Monad
-import           Control.Concurrent             (forkIO, threadDelay)
-import           Data.IORef
+import           Control.Concurrent             (MVar, forkIO, modifyMVar, newMVar, threadDelay)
 import qualified Data.Map                        as Map
 import qualified Data.Set                        as Set
 import           System.Environment
@@ -53,9 +52,9 @@ foreign import ccall "setEffekseerPlayerPosition" c_setEffeksserPlayerPosition :
 -- Remaining effect variants in the current seven-effect cycle.  This is
 -- deliberately separate from the game state so replay/save data stays in its
 -- existing format.
-forceFieldEffectPool :: IORef [Int]
+forceFieldEffectPool :: MVar [Int]
 {-# NOINLINE forceFieldEffectPool #-}
-forceFieldEffectPool = unsafePerformIO $ newIORef [0 .. 6]
+forceFieldEffectPool = unsafePerformIO $ newMVar [0 .. 6]
 
 type Point= Vertex3 GLdouble
 
@@ -1406,8 +1405,8 @@ newParticles n p v= do
 --  drawing
 --
 -------------------------
-renderMonadius :: [Key] -> Monadius -> IO ()
-renderMonadius realKeys (Monadius (variables,objects)) = do
+renderMonadius :: [GL.TextureObject] -> [Key] -> Monadius -> IO ()
+renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   putDebugStrLn $ show $ length objects
   mapM_ renderGameObject objects
   preservingMatrix $ do
@@ -1547,22 +1546,41 @@ renderMonadius realKeys (Monadius (variables,objects)) = do
         renderTriangle = do
           renderPrimitive LineLoop $ ugoVertices2DFreq 0 0.1 1 $ map (\t -> (cos t,sin t)) [0,pi*2/3,pi*4/3]
 -}
-  renderGameObject me@Shield{position=x:+y, size = r,angle = theta} = preservingMatrix $ do
+  renderGameObject me@Shield{position=x:+y} = preservingMatrix $ do
     translate (Vector3 x y 0)
---    rotate (90*intToGLdouble(clock`mod`4)) (Vector3 0 0 (1 :: GLdouble))
-    color (Color3 (1.2*(1-hpRate)) 0.5 (1.6*hpRate)  :: Color3 GLdouble)
-    renderPrimitive LineLoop $ vertices2D 0 $ [a,b,c]
-    renderPrimitive Lines $ vertices2D 0 $ [a,d,a,e]
-    renderPrimitive LineStrip $ vertices2D 0 $ [c,d,e,b]
+    blendFunc $= (SrcAlpha, One)
+    texture Texture2D $= Enabled
+    textureFunction $= Modulate
+    let shieldTexture = shieldTextures !! ((gameClock variables `div` 4) `mod` length shieldTextures)
+    textureBinding Texture2D $= Just shieldTexture
+    -- Preserve the blue-white aura at every HP level, then add a second,
+    -- increasingly strong tint layer as the shield is damaged.
+    let baseColor alpha = Color4 (1.0 :: GLdouble) 1.0 1.0 alpha
+        shieldColor alpha = Color4 (1.2 * (1 - hpRate)) 0.5 (1.6 * hpRate) alpha
+    let texCoord2f = texCoord :: TexCoord2 GLfloat -> IO ()
+        vertex3f = vertex :: Vertex3 GLfloat -> IO ()
+        halfWidth = 100 :: GLfloat
+        halfHeight = 46 :: GLfloat
+    let drawShield tint = renderPrimitive Quads $ do
+          texCoord2f (TexCoord2 0 0)
+          color tint
+          vertex3f (Vertex3 (-halfWidth) (-halfHeight) 0)
+          texCoord2f (TexCoord2 0 1)
+          color tint
+          vertex3f (Vertex3 (-halfWidth) halfHeight 0)
+          texCoord2f (TexCoord2 1 1)
+          color tint
+          vertex3f (Vertex3 halfWidth halfHeight 0)
+          texCoord2f (TexCoord2 1 0)
+          color tint
+          vertex3f (Vertex3 halfWidth (-halfHeight) 0)
+    drawShield (baseColor (1.0 :: GLdouble))
+    drawShield (shieldColor (0.65 * (1 - hpRate)))
+    texture Texture2D $= Disabled
+    textureFunction $= Modulate
+    blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
     where
-      [a,b,c,d,e] = [(0,0),(r*2,0),(0,r),(-r*2,0),(0,-r)]
-      r = forceFieldSize
-      --    c
-      --   /|\
-      --  d-a-b
-      --   \|/
-      --    e
-      hpRate = (intToGLdouble $ hp me)/(intToGLdouble shieldMaxHp)
+      hpRate = max 0 $ min 1 $ (intToGLdouble $ hp me)/(intToGLdouble shieldMaxHp)
 
   renderGameObject powerUpCapsule@PowerUpCapsule{} = preservingMatrix $ do
     let x:+y = position powerUpCapsule
@@ -1988,13 +2006,11 @@ playSeMonadius sounds ses realKeys(Monadius (variables,objects)) = do
   -- Select from the variants that have not appeared in this cycle.  After all
   -- seven have appeared, the next activation begins a fresh random cycle.
   nextForceFieldEffect :: IO Int
-  nextForceFieldEffect = do
-    remaining <- readIORef forceFieldEffectPool
+  nextForceFieldEffect = modifyMVar forceFieldEffectPool $ \remaining -> do
     let candidates = if null remaining then [0 .. 6] else remaining
     selectedAt <- randomRIO (0, length candidates - 1)
     let selected = candidates !! selectedAt
-    writeIORef forceFieldEffectPool (delete selected candidates)
-    return selected
+    return (delete selected candidates, selected)
 
   collide :: [GameObject] -> [GameObject]
   -- collide a list of GameObjects and return the result.

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="218" viewBox="0 0 480 218">
+  <!-- The player is aligned with the bright core at x=30%, y=50%. -->
+  <defs>
+    <radialGradient id="falloff" cx="30%" cy="50%" r="90%">
+      <stop offset="0%" stop-color="white"/>
+      <stop offset="24%" stop-color="#eeeeee"/>
+      <stop offset="55%" stop-color="#c0c0c0"/>
+      <stop offset="82%" stop-color="#808080"/>
+      <stop offset="100%" stop-color="#202020"/>
+    </radialGradient>
+  </defs>
+  <rect width="480" height="218" fill="url(#falloff)"/>
+</svg>
