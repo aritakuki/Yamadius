@@ -41,13 +41,14 @@ import           Data.Array.Repa                 as R hiding (Array, Shape, map,
 import qualified Data.Array.Repa.Repr.ForeignPtr as RF
 import           Data.Word
 import           Foreign.ForeignPtr
-import           Foreign.C.Types             (CInt (..))
+import           Foreign.C.Types             (CFloat (..), CInt (..))
 import qualified Graphics.Rendering.OpenGL.GL    as GL
 import           System.Exit                     (ExitCode (ExitSuccess),
                                                   exitFailure, exitWith)
 import           Unsafe.Coerce
 
 foreign import ccall "_Z16restartEffekseeri" c_restartEffeksser :: CInt -> IO ()
+foreign import ccall "setEffekseerPlayerPosition" c_setEffeksserPlayerPosition :: CFloat -> CFloat -> IO ()
 
 -- Remaining effect variants in the current seven-effect cycle.  This is
 -- deliberately separate from the game state so replay/save data stays in its
@@ -581,7 +582,7 @@ updateMonadius realKeys (Monadius (variables,objects))
                             filterJust.map scroll $
                             concatMap updateGameObject $
                             gameObjectsAfterCollision
-  gameObjectsAfterCollision = collide objectsAfterForceField
+  gameObjectsAfterCollision = collide objectsAfterPowerUp
   -- * collision must be done BEFORE updateGameObject(moving), for
   --   players would like to see the moment of collision.
   -- * loading new objects after collision and moving is nice idea, since
@@ -590,30 +591,49 @@ updateMonadius realKeys (Monadius (variables,objects))
   --   before it is actually taken effect in updateGameObject.
   --   such routine should use gameObjectsAfterCollision.
 
-  -- A shield activation is also the trigger for the imported visual effect.
-  -- Remove hostile objects before collision/update so the clear is immediate
-  -- and cannot damage the player on the activation frame.
-  forceFieldActivated = (powerUpButton `elem` keys) &&
-    powerUpPointer vicViper == gaugeOfShield &&
-    powerUpLevels vicViper!powerUpPointer vicViper < powerUpLimits!!powerUpPointer vicViper
-  objectsAfterForceField = if forceFieldActivated
-    then filter (not . isForceFieldTarget) objects
+  -- Every power-up activation triggers the imported visual effect.
+  -- Defeat hostile objects before collision/update so their normal death
+  -- routines create explosions, scores, and power-up capsules.
+  powerUpActivated = (powerUpButton `elem` keys) && (powerUpPointer vicViper >= 0) &&
+    (powerUpPointer vicViper == gaugeOfSpeedup ||
+     powerUpLevels vicViper!powerUpPointer vicViper < powerUpLimits!!powerUpPointer vicViper)
+  objectsAfterPowerUp = if powerUpActivated
+    then map defeatPowerUpTarget $ filter (not . isPowerUpSpawner) objects
     else objects
-  loadObjectsForFrame = if forceFieldActivated
-    then filter (not . isForceFieldTarget) loadObjects
+  loadObjectsForFrame = if powerUpActivated
+    then filter (not . isPowerUpSpawnTarget) loadObjects
     else loadObjects
 
-  isForceFieldTarget :: GameObject -> Bool
-  isForceFieldTarget DiamondBomb{}     = True
-  isForceFieldTarget TurnGear{}        = True
-  isForceFieldTarget SquadManager{}    = True
-  isForceFieldTarget Jumper{}          = True
-  isForceFieldTarget Grashia{}         = True
-  isForceFieldTarget Ducker{}          = True
-  isForceFieldTarget Flyer{}           = True
-  isForceFieldTarget ScrambleHatch{}   = True
-  isForceFieldTarget SabbathicAgent{}  = True
-  isForceFieldTarget _                 = False
+  defeatPowerUpTarget :: GameObject -> GameObject
+  defeatPowerUpTarget enemy@DiamondBomb{}    = enemy{hp = 0}
+  defeatPowerUpTarget enemy@TurnGear{}       = enemy{hp = 0}
+  defeatPowerUpTarget squad@SquadManager{}   = squad{members = [], currentScore = bonusScore squad}
+  defeatPowerUpTarget enemy@Jumper{}         = enemy{hp = 0}
+  defeatPowerUpTarget enemy@Grashia{}        = enemy{hp = 0}
+  defeatPowerUpTarget enemy@Ducker{}         = enemy{hp = 0}
+  defeatPowerUpTarget enemy@Flyer{}          = enemy{hp = 0}
+  defeatPowerUpTarget enemy@ScrambleHatch{}  = enemy{hp = 0}
+  defeatPowerUpTarget object                 = object
+
+  -- SabbathicAgent has no death/reward behavior; remove it to stop it from
+  -- creating more enemies after the screen-clear.
+  isPowerUpSpawner :: GameObject -> Bool
+  isPowerUpSpawner SabbathicAgent{} = True
+  isPowerUpSpawner _                = False
+
+  -- Objects scheduled for this exact frame have not entered the game yet, so
+  -- skip them rather than allowing a new hostile object to appear post-clear.
+  isPowerUpSpawnTarget :: GameObject -> Bool
+  isPowerUpSpawnTarget DiamondBomb{}     = True
+  isPowerUpSpawnTarget TurnGear{}        = True
+  isPowerUpSpawnTarget SquadManager{}    = True
+  isPowerUpSpawnTarget Jumper{}          = True
+  isPowerUpSpawnTarget Grashia{}         = True
+  isPowerUpSpawnTarget Ducker{}          = True
+  isPowerUpSpawnTarget Flyer{}           = True
+  isPowerUpSpawnTarget ScrambleHatch{}   = True
+  isPowerUpSpawnTarget SabbathicAgent{}  = True
+  isPowerUpSpawnTarget _                 = False
 
 
   newVariables = variables{
@@ -1026,7 +1046,7 @@ updateMonadius realKeys (Monadius (variables,objects))
   collide :: [GameObject] -> [GameObject]
   -- collide a list of GameObjects and return the result.
   -- it is important NOT to delete any object at the collision -- collide, show then delete
-  collide = map personalCollide
+  collide collisionObjects = map personalCollide collisionObjects
     where
     -- each object has its own hitClasses and weakPoints.
     -- collision is not symmetric: A may crushed by B while B doesn't feel A.
@@ -1036,7 +1056,7 @@ updateMonadius realKeys (Monadius (variables,objects))
 
     objectsWhoseHitClassIsMyWeakPoint :: GameObject -> [GameObject]
     objectsWhoseHitClassIsMyWeakPoint me =
-      filter (\him -> not $ null $ (weakPoint me) `intersect` (hitClass him)) gameObjects
+      filter (\him -> not $ null $ (weakPoint me) `intersect` (hitClass him)) collisionObjects
 
     hitClass :: GameObject -> [HitClass]
     hitClass VicViper{}        = [MetalionBody,ItemReceiver]
@@ -1859,13 +1879,7 @@ playSeMonadius sounds ses realKeys(Monadius (variables,objects)) = do
 
   playSeGameObject vic@VicViper{position = x:+y} =
     if doesPowerUp then
-      if powerUpPointer vicViper == gaugeOfSpeedup then playSound (speedUp ses) else
-      if powerUpPointer vicViper == gaugeOfMissile then playSound (missile ses) else
-      if powerUpPointer vicViper == gaugeOfGLdouble then playSound (double ses) else
-      if powerUpPointer vicViper == gaugeOfLaser then playSound (laser ses) else
-      if powerUpPointer vicViper == gaugeOfOption then playSound (option ses) else
-      if powerUpPointer vicViper == gaugeOfShield then playForceFieldEffect ses else
-      return ()
+      playForceFieldEffect ses
     else if hp vic <= 0 && ageAfterDeath vic == 0 then do
       stopMusic sounds
       playSound (destroy ses)
@@ -1952,6 +1966,8 @@ playSeMonadius sounds ses realKeys(Monadius (variables,objects)) = do
     effectIndex <- nextForceFieldEffect
     case effectIndex of
       0 -> do
+        let playerX :+ playerY = position vicViper
+        c_setEffeksserPlayerPosition (realToFrac playerX) (realToFrac playerY)
         c_restartEffeksser 1
         playSound (launchers effectSounds)
         playSound (launcher3 effectSounds)
