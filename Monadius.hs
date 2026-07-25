@@ -1896,7 +1896,8 @@ playSeMonadius sounds ses realKeys(Monadius (variables,objects)) = do
   playSeGameObject :: GameObject -> IO ()
 
   playSeGameObject vic@VicViper{position = x:+y} =
-    if doesPowerUp then
+    if doesPowerUp then do
+      playPowerUpVoice ses (powerUpPointer vic)
       playForceFieldEffect ses
     else if hp vic <= 0 && ageAfterDeath vic == 0 then do
       stopMusic sounds
@@ -1975,6 +1976,19 @@ playSeMonadius sounds ses realKeys(Monadius (variables,objects)) = do
      goNextStage = gameClock variables > stageClearTime
 
   playSeGameObject _ = return ()
+
+  -- Start the selected power-up announcement alongside the current force
+  -- field effect.  Each Source is independent, so its voice overlaps the
+  -- effect sound instead of replacing it.
+  playPowerUpVoice :: SEs -> Int -> IO ()
+  playPowerUpVoice voiceSounds powerUpIndex = case powerUpIndex of
+    i | i == gaugeOfSpeedup  -> playSound (speedUp voiceSounds)
+    i | i == gaugeOfMissile  -> playSound (missile voiceSounds)
+    i | i == gaugeOfGLdouble -> playSound (double voiceSounds)
+    i | i == gaugeOfLaser    -> playSound (laser voiceSounds)
+    i | i == gaugeOfOption   -> playSound (option voiceSounds)
+    i | i == gaugeOfShield   -> playSound (shieldVoice voiceSounds)
+    _                        -> return ()
 
   -- Reuse the non-voice sounds and effects assigned to F1--F6 and F12 in
   -- rectangle_with_texture_blending.  The choice is made once per shield

@@ -216,7 +216,7 @@ loadSEs = do
     doubleSource <- loadSound "SE/doubleVoice.wav"
     sourceGain doubleSource Sound.ALUT.$= 1.0
     laserVoiceSource <- loadSound "SE/laserVoice.wav"
-    sourceGain laserSource Sound.ALUT.$= 1.0
+    sourceGain laserVoiceSource Sound.ALUT.$= 1.0
     optionSource <- loadSound "SE/optionVoice.wav"
     sourceGain optionSource Sound.ALUT.$= 1.0
     shieldSource <- loadSound "SE/shieldVoice.wav"
