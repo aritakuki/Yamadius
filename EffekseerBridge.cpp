@@ -8,12 +8,14 @@
 
 namespace {
 constexpr int kEffectTerm = 160;
+constexpr int kWindEffectTerm = 240;
 
 EffekseerRendererGL::RendererRef renderer;
 Effekseer::ManagerRef manager;
 Effekseer::EffectRef effect;
 Effekseer::Handle handle = 0;
 int effectTime = kEffectTerm - 1;
+int effectTerm = kEffectTerm;
 
 std::array<float, 9> readCameraParameters(const char* path) {
   std::array<float, 9> values = {10.0f, 5.0f, 20.0f, 4.0f, 0.0f,
@@ -35,12 +37,13 @@ void setCamera(const char* path) {
       Effekseer::Vector3D(values[6], values[7], values[8])));
 }
 
-void loadEffect(const char* parameters, const char16_t* effectPath) {
+void loadEffect(const char* parameters, const char16_t* effectPath, int term = kEffectTerm) {
   if (manager.Get() == nullptr || renderer.Get() == nullptr) return;
   manager->StopEffect(handle);
   setCamera(parameters);
   effect = Effekseer::Effect::Create(manager, effectPath);
   effectTime = 0;
+  effectTerm = term;
 }
 }  // namespace
 
@@ -51,7 +54,7 @@ void restartEffekseer(int kind) {
     case 3:  loadEffect("Params/craw.txt", u"Effects/craw.efk"); break;
     case 4:  loadEffect("Params/warero.txt", u"Effects/warero.efk"); break;
     case 5:  loadEffect("Params/icchimae.txt", u"Effects/icchimae.efk"); break;
-    case 6:  loadEffect("Params/kaze.txt", u"Effects/kaze.efk"); break;
+    case 6:  loadEffect("Params/kaze.txt", u"Effects/kaze.efk", kWindEffectTerm); break;
     case 12: loadEffect("Params/open.txt", u"Effects/open.efk"); break;
     default: break;
   }
@@ -80,8 +83,13 @@ void initEffekseer(int32_t windowWidth, int32_t windowHeight) {
 void procEffekseer() {
   if (manager.Get() == nullptr || renderer.Get() == nullptr) return;
   if (effect.Get() != nullptr && effectTime == 0) handle = manager->Play(effect, 0, 0, 0);
-  if (effect.Get() != nullptr && effectTime == kEffectTerm - 1) manager->StopEffect(handle);
-  if (effect.Get() != nullptr) effectTime = (effectTime + 1) % kEffectTerm;
+  if (effect.Get() != nullptr && effectTime == effectTerm - 1) {
+    manager->StopEffect(handle);
+    effect.Reset();
+    handle = 0;
+  } else if (effect.Get() != nullptr) {
+    ++effectTime;
+  }
   manager->Update();
   renderer->BeginRendering();
   manager->Draw();

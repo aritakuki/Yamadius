@@ -22,6 +22,7 @@ module Util (
   stopMusic,
   backgroundMusic,
   playSound,
+  stopSound,
   ) where
 
 import           Control.Concurrent
@@ -187,6 +188,9 @@ playSound source = do
     unless (null errs) $ do
         hPutStrLn stderr (concat (intersperse "," [ d | ALError _ d <- errs ]))
     return ()
+
+stopSound :: Source -> IO ()
+stopSound source = stop [source]
 
 loadSEs :: IO SEs
 loadSEs = do
