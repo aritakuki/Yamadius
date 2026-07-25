@@ -123,7 +123,8 @@ main = do
 
       backgroundMusic (bgm0 sounds)
 
-      initialWindowSize Graphics.UI.GLUT.$= Size 640 480
+      -- Keep the original 640x480 stage intact and add a 90px HUD strip.
+      initialWindowSize Graphics.UI.GLUT.$= Size 640 570
       initialDisplayMode Graphics.UI.GLUT.$= [RGBAMode,DoubleBuffered{-,WithDepthBuffer,WithAlphaComponent-}]
 --      initialize "" []
       wnd <- createWindow "Monadius"
@@ -160,6 +161,7 @@ main = do
 
       displayCallback Graphics.UI.GLUT.$= dispProc cp
       keyboardMouseCallback Graphics.UI.GLUT.$= Just (keyProc keystate)
+      reshapeCallback Graphics.UI.GLUT.$= Just (const initMatrix)
       addTimerCallback 16 (timerProc (dispProc cp))
 
       initMatrix
@@ -188,10 +190,11 @@ exitLoop = exitSuccess
 
 initMatrix :: IO ()
 initMatrix = do
-  viewport Graphics.UI.GLUT.$= (Position 0 0,Size 640 480)
+  Size width height <- get windowSize
+  viewport Graphics.UI.GLUT.$= (Position 0 0,Size width height)
   matrixMode Graphics.UI.GLUT.$= Projection
   loadIdentity
-  perspective 30.0 (4/3) 600 1400
+  perspective 30.0 (fromIntegral width / fromIntegral height) 600 1400
   lookAt (Vertex3 0 0 (927 :: GLdouble)) (Vertex3 0 0 (0 :: GLdouble)) (Vector3 0 1 (0 :: GLdouble))
 
 dispProc :: IORef (IO Scene) -> IO ()
