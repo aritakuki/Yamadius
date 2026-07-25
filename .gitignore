@@ -38,3 +38,6 @@ cmake_install.cmake
 /external/glfw-3.1.2/tests/threads
 /external/glfw-3.1.2/tests/title
 /external/glfw-3.1.2/tests/windows
+
+# Effekseer editor project files are not needed at runtime.
+/Effects/*.efkproj

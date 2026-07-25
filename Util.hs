@@ -130,7 +130,15 @@ data SEs = SEs { start           :: Source
                   , laser        :: Source
                   , option       :: Source
                   , shieldVoice  :: Source
-                  , destroy      :: Source }
+                  , destroy      :: Source
+                  , launcher3    :: Source
+                  , launchers    :: Source
+                  , eftsuki      :: Source
+                  , efatchi      :: Source
+                  , efwarero     :: Source
+                  , eficchimae   :: Source
+                  , efkaze       :: Source
+                  , efopen       :: Source }
 
 loadSounds :: IO Sounds
 loadSounds = do
@@ -211,6 +219,14 @@ loadSEs = do
     sourceGain shieldSource Sound.ALUT.$= 1.0
     destroySource <- loadSound "SE/destroy.wav"
     sourceGain destroySource Sound.ALUT.$= 1.0
+    launcher3Source <- loadSound "SE/launcher3.wav"
+    launchersSource <- loadSound "SE/launchers.wav"
+    eftsukiSource <- loadSound "SE/EfTsuki.wav"
+    efatchiSource <- loadSound "SE/EfAtchi.wav"
+    efwareroSource <- loadSound "SE/EfWarero.wav"
+    eficchimaeSource <- loadSound "SE/EfIcchimae.wav"
+    efkazeSource <- loadSound "SE/EfKaze.wav"
+    efopenSource <- loadSound "SE/EfOpen.wav"
     return $ SEs
       startSource
       shotSource
@@ -227,3 +243,11 @@ loadSEs = do
       optionSource
       shieldSource
       destroySource
+      launcher3Source
+      launchersSource
+      eftsukiSource
+      efatchiSource
+      efwareroSource
+      eficchimaeSource
+      efkazeSource
+      efopenSource

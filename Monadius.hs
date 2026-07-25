@@ -1,3 +1,5 @@
+{-# LANGUAGE ForeignFunctionInterface #-}
+
 module Monadius (
   Monadius(..),
   initialMonadius,
@@ -37,12 +39,13 @@ import           Data.Array.Repa                 as R hiding (Array, Shape, map,
 import qualified Data.Array.Repa.Repr.ForeignPtr as RF
 import           Data.Word
 import           Foreign.ForeignPtr
+import           Foreign.C.Types             (CInt (..))
 import qualified Graphics.Rendering.OpenGL.GL    as GL
 import           System.Exit                     (ExitCode (ExitSuccess),
                                                   exitFailure, exitWith)
 import           Unsafe.Coerce
 
-
+foreign import ccall "_Z16restartEffekseeri" c_restartEffeksser :: CInt -> IO ()
 type Point= Vertex3 GLdouble
 
 instance Game Monadius where
@@ -1854,7 +1857,7 @@ playSeMonadius sounds ses realKeys(Monadius (variables,objects)) = do
       if powerUpPointer vicViper == gaugeOfGLdouble then playSound (double ses) else
       if powerUpPointer vicViper == gaugeOfLaser then playSound (laser ses) else
       if powerUpPointer vicViper == gaugeOfOption then playSound (option ses) else
-      if powerUpPointer vicViper == gaugeOfShield then playSound (shieldVoice ses) else
+      if powerUpPointer vicViper == gaugeOfShield then playForceFieldEffect ses else
       return ()
     else if hp vic <= 0 && ageAfterDeath vic == 0 then do
       stopMusic sounds
@@ -1933,6 +1936,24 @@ playSeMonadius sounds ses realKeys(Monadius (variables,objects)) = do
      goNextStage = gameClock variables > stageClearTime
 
   playSeGameObject _ = return ()
+
+  -- Reuse the non-voice sounds and effects assigned to F1--F6 and F12 in
+  -- rectangle_with_texture_blending.  The choice is made once per shield
+  -- activation, before the next game-state update consumes the power-up.
+  playForceFieldEffect :: SEs -> IO ()
+  playForceFieldEffect effectSounds = do
+    effectIndex <- randomRIO (0 :: Int, 6)
+    case effectIndex of
+      0 -> do
+        c_restartEffeksser 1
+        playSound (launchers effectSounds)
+        playSound (launcher3 effectSounds)
+      1 -> c_restartEffeksser 2  >> playSound (eftsuki effectSounds)
+      2 -> c_restartEffeksser 3  >> playSound (efatchi effectSounds)
+      3 -> c_restartEffeksser 4  >> playSound (efwarero effectSounds)
+      4 -> c_restartEffeksser 5  >> playSound (eficchimae effectSounds)
+      5 -> c_restartEffeksser 6  >> playSound (efkaze effectSounds)
+      _ -> c_restartEffeksser 12 >> playSound (efopen effectSounds)
 
   collide :: [GameObject] -> [GameObject]
   -- collide a list of GameObjects and return the result.

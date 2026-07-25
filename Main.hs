@@ -126,7 +126,7 @@ main = do
 --      initialize "" []
       wnd <- createWindow "Monadius"
 
---      c_initEffeksser 640 480
+      c_initEffeksser 640 480
 
       --テクスチャを読み込む
       tex <- loadTextureFromFile "/home/yamaguchi/Haskell/ALUT-master/picture/IMG_3284-removebg-preview.png"
@@ -162,7 +162,7 @@ main = do
 
       destroyWindow curwnd
 
---      c_finishEffeksser
+      c_finishEffeksser
 
       `catch` (\(SomeException _) -> return ())
 
@@ -410,7 +410,7 @@ mainProc tex ses sounds vars gs ks = do
 
   render tex keystate gamestate
 
---  c_procEffeksser
+  c_procEffeksser
 
   swapBuffers
   let currentLevel = baseGameLevel$getVariables$gameBody gamestate
