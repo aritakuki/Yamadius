@@ -1,10 +1,13 @@
 #include <Effekseer/Effekseer.h>
 #include <EffekseerRendererGL/EffekseerRendererGL.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 #include <array>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <string>
 
 namespace {
@@ -23,6 +26,83 @@ float playerScreenY = 0.0f;
 std::array<float, 3> cameraRight = {1.0f, 0.0f, 0.0f};
 std::array<float, 3> cameraUp = {0.0f, 1.0f, 0.0f};
 std::array<float, 3> cameraTarget = {0.0f, 0.0f, 0.0f};
+
+struct Glyph {
+  GLuint texture = 0;
+  int width = 0;
+  int height = 0;
+  int bearing_x = 0;
+  int bearing_y = 0;
+  unsigned advance = 0;
+};
+
+FT_Library subtitleFontLibrary = nullptr;
+FT_Face subtitleFontFace = nullptr;
+std::map<unsigned long, Glyph> subtitleGlyphs;
+
+void initializeSubtitleFont() {
+  if (FT_Init_FreeType(&subtitleFontLibrary) != 0) return;
+  if (FT_New_Face(subtitleFontLibrary,
+                  "/usr/share/fonts/liberation-serif-fonts/LiberationSerif-Italic.ttf",
+                  0, &subtitleFontFace) != 0) {
+    subtitleFontFace = nullptr;
+    FT_Done_FreeType(subtitleFontLibrary);
+    subtitleFontLibrary = nullptr;
+    return;
+  }
+  FT_Set_Pixel_Sizes(subtitleFontFace, 0, 30);
+}
+
+const Glyph* subtitleGlyph(unsigned long codepoint) {
+  if (subtitleFontFace == nullptr) return nullptr;
+  const auto cached = subtitleGlyphs.find(codepoint);
+  if (cached != subtitleGlyphs.end()) return &cached->second;
+  if (FT_Load_Char(subtitleFontFace, codepoint, FT_LOAD_RENDER) != 0) return nullptr;
+
+  const FT_GlyphSlot glyph = subtitleFontFace->glyph;
+  Glyph rendered;
+  rendered.width = glyph->bitmap.width;
+  rendered.height = glyph->bitmap.rows;
+  rendered.bearing_x = glyph->bitmap_left;
+  rendered.bearing_y = glyph->bitmap_top;
+  rendered.advance = glyph->advance.x;
+  glGenTextures(1, &rendered.texture);
+  glBindTexture(GL_TEXTURE_2D, rendered.texture);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, rendered.width, rendered.height, 0,
+               GL_ALPHA, GL_UNSIGNED_BYTE, glyph->bitmap.buffer);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  return &subtitleGlyphs.emplace(codepoint, rendered).first->second;
+}
+
+float subtitleTextWidth(const std::string& text) {
+  float width = 0.0f;
+  for (const unsigned char character : text) {
+    if (const Glyph* glyph = subtitleGlyph(character)) width += glyph->advance >> 6;
+  }
+  return width;
+}
+
+float drawSubtitleText(const std::string& text, float x, float baseline) {
+  for (const unsigned char character : text) {
+    const Glyph* glyph = subtitleGlyph(character);
+    if (glyph == nullptr) continue;
+    const float left = x + glyph->bearing_x;
+    const float bottom = baseline - (glyph->height - glyph->bearing_y);
+    glBindTexture(GL_TEXTURE_2D, glyph->texture);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 1.0f); glVertex2f(left, bottom);
+    glTexCoord2f(1.0f, 1.0f); glVertex2f(left + glyph->width, bottom);
+    glTexCoord2f(1.0f, 0.0f); glVertex2f(left + glyph->width, bottom + glyph->height);
+    glTexCoord2f(0.0f, 0.0f); glVertex2f(left, bottom + glyph->height);
+    glEnd();
+    x += glyph->advance >> 6;
+  }
+  return x;
+}
 
 std::array<float, 3> normalize(const std::array<float, 3>& vector) {
   const float length = std::sqrt(vector[0] * vector[0] + vector[1] * vector[1] +
@@ -112,6 +192,47 @@ void initEffekseer(int32_t windowWidth, int32_t windowHeight) {
       static_cast<float>(windowWidth) / static_cast<float>(windowHeight),
       0.0f, 500.0f));
   setCamera("Params/marisa.txt");
+  initializeSubtitleFont();
+}
+
+extern "C" void renderStageTwoCaption(float alpha, int stageWidth, int stageHeight) {
+  if (subtitleFontFace == nullptr || alpha <= 0.0f) return;
+
+  GLint matrixMode = GL_MODELVIEW;
+  glGetIntegerv(GL_MATRIX_MODE, &matrixMode);
+  glPushAttrib(GL_COLOR_BUFFER_BIT | GL_CURRENT_BIT | GL_ENABLE_BIT | GL_TEXTURE_BIT);
+  glMatrixMode(GL_PROJECTION);
+  glPushMatrix();
+  glLoadIdentity();
+  glOrtho(0.0, stageWidth, 0.0, stageHeight, -1.0, 1.0);
+  glMatrixMode(GL_MODELVIEW);
+  glPushMatrix();
+  glLoadIdentity();
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glEnable(GL_TEXTURE_2D);
+  glDisable(GL_DEPTH_TEST);
+  glColor4f(1.0f, 1.0f, 1.0f, alpha);
+
+  const float centerX = stageWidth * 0.5f;
+  const float centerY = stageHeight * 0.5f;
+  const std::string headline = "FINAL STAGE";
+  drawSubtitleText(headline, centerX - subtitleTextWidth(headline) * 0.5f,
+                   centerY + 18.0f);
+
+  const std::string subtitle = "FATE";
+  float cursor = centerX - (subtitleTextWidth(subtitle) + 54.0f) * 0.5f;
+  cursor = drawSubtitleText(subtitle, cursor, centerY - 17.0f) + 9.0f;
+  for (int index = 0; index < 5; ++index) {
+    cursor = drawSubtitleText("\xB7", cursor, centerY - 17.0f) + 5.0f;
+  }
+
+  glMatrixMode(GL_MODELVIEW);
+  glPopMatrix();
+  glMatrixMode(GL_PROJECTION);
+  glPopMatrix();
+  glMatrixMode(matrixMode);
+  glPopAttrib();
 }
 
 void procEffekseer() {
@@ -155,6 +276,10 @@ void procEffekseer() {
 }
 
 void finishEffekseer() {
+  if (subtitleFontFace != nullptr) FT_Done_Face(subtitleFontFace);
+  if (subtitleFontLibrary != nullptr) FT_Done_FreeType(subtitleFontLibrary);
+  subtitleFontFace = nullptr;
+  subtitleFontLibrary = nullptr;
   manager.Reset();
   renderer.Reset();
 }

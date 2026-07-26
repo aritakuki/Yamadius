@@ -48,6 +48,7 @@ import           Unsafe.Coerce
 
 foreign import ccall "_Z16restartEffekseeri" c_restartEffeksser :: CInt -> IO ()
 foreign import ccall "setEffekseerPlayerPosition" c_setEffeksserPlayerPosition :: CFloat -> CFloat -> IO ()
+foreign import ccall "renderStageTwoCaption" c_renderStageTwoCaption :: CFloat -> CInt -> CInt -> IO ()
 
 -- Remaining effect variants in the current seven-effect cycle.  This is
 -- deliberately separate from the game state so replay/save data stays in its
@@ -411,7 +412,12 @@ initialMonadius initVs = Monadius (initGameVariables,initGameObjects)
     where
       initGameVariables = initVs
       initGameObjects =
-          stars ++ [freshVicViper,freshPowerUpGauge,freshShootingStar]
+          stars ++ [initialVicViper,freshPowerUpGauge,freshShootingStar]
+      -- The temporary direct stage-2 start is for caption tuning; place the
+      -- ship at the left edge so the reference composition is easy to check.
+      initialVicViper = if baseGameLevel initVs == 2
+        then freshVicViper{position = (-280):+0}
+        else freshVicViper
       stars = take 26 $ map (\(t,i) -> Star{tag=Nothing,position = (fix 320 t:+fix 201 t),particleColor=colors!!i}) $ zip (map (\x -> square x + x + 41) [2346,19091..]) [1..]
       fix :: Int -> Int -> GLdouble
       fix limit value = intToGLdouble $ (value `mod` (2*limit) - limit)
@@ -1426,6 +1432,7 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   -- their faces from covering ships, shots, and the foreground UI.
   mapM_ renderGameObject $ filter isLandscape objects
   mapM_ renderGameObject $ filter (not . isGauge) $ filter (not . isLandscape) objects
+  renderStageTwoCaption stageWidth stageHeight
   -- Particles leave an additive blend equation active.  With that equation a
   -- black source contributes nothing, so restore ordinary alpha compositing
   -- before drawing the opaque HUD backing.
@@ -1469,6 +1476,17 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   scoreStr2 = if isNothing $ playTitle variables then "HI "++((padding '0' 8).show.hiScore) variables else (fromJust $ playTitle variables)
 
   gameclock = gameClock variables
+
+  -- Match the two-line intermission caption from the supplied reference.
+  -- It appears only at the start of stage 2 and fades over three seconds.
+  renderStageTwoCaption :: Int -> Int -> IO ()
+  renderStageTwoCaption width height = when showCaption $ do
+    let captionAlpha
+          | gameclock < 30  = intToGLdouble gameclock / 30
+          | gameclock < 120 = 1
+          | otherwise       = 1 - intToGLdouble (gameclock - 120) / 60
+    c_renderStageTwoCaption (realToFrac captionAlpha) (fromIntegral width) (fromIntegral height)
+  showCaption = baseGameLevel variables == 2 && gameclock < 180
 
   isLandscape :: GameObject -> Bool
   isLandscape LandScapeBlock{} = True

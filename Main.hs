@@ -272,7 +272,7 @@ openingProc shieldTextures ses sounds clock menuCursor vars ks = do
 
   if Char ' ' `elem` keystate && clock >= timeLimit then
      if menuCursor == 0 then
-       gameStart 1 0 False (recorderMode vars) vars
+       gameStart 2 0 False (recorderMode vars) vars
      else
        gameStart savedLevel savedArea (isCheat vars) (recorderMode vars) vars
    else if isJust $ getNumberKey keystate then
@@ -292,17 +292,24 @@ openingProc shieldTextures ses sounds clock menuCursor vars ks = do
      gameStart level area ischeat recordermode vrs = do
        stopMusic sounds
        playSound (start ses)
-       backgroundMusic (bgm1 sounds)
+       backgroundMusic (stageMusic level)
       -- it is possible to temporary set (recordermode /= recorderMode vars)
        gs <- newIORef $ initialRecorder recordermode (playbackKeys vrs) (initialMonadius GameVariables{
        totalScore=0, flagGameover=False,  hiScore=saveHiScore vrs,
        nextTag=0, gameClock = savePoints!!area ,baseGameLevel = level,
-       stageEntranceFrames = 120,
+       stageEntranceFrames = if level == 1 then 120 else 0,
        playTitle = if recordermode /= Playback then Nothing else playBackName vrs})
-       c_setEffeksserPlayerPosition (-340) 0
-       c_restartEffeksser 12
-       playSound (efopen ses)
+       when (level == 1) $ do
+         c_setEffeksserPlayerPosition (-340) 0
+         c_restartEffeksser 12
+         playSound (efopen ses)
        return $ Scene $ mainProc shieldTextures ses sounds vrs{isCheat=ischeat,recordSaveState=(level,area)} gs ks
+
+     stageMusic level = case level of
+       1 -> bgm1 sounds
+       2 -> bgm2 sounds
+       3 -> bgm3 sounds
+       _ -> bgm1 sounds
 
      (savedLevel,savedArea) = saveState vars
 
