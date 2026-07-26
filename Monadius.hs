@@ -49,6 +49,7 @@ import           Unsafe.Coerce
 foreign import ccall "_Z16restartEffekseeri" c_restartEffeksser :: CInt -> IO ()
 foreign import ccall "setEffekseerPlayerPosition" c_setEffeksserPlayerPosition :: CFloat -> CFloat -> IO ()
 foreign import ccall "renderStageTwoCaption" c_renderStageTwoCaption :: CFloat -> CInt -> CInt -> IO ()
+foreign import ccall "renderStageThreeCaption" c_renderStageThreeCaption :: CInt -> CInt -> CInt -> IO ()
 
 -- Remaining effect variants in the current seven-effect cycle.  This is
 -- deliberately separate from the game state so replay/save data stays in its
@@ -412,12 +413,7 @@ initialMonadius initVs = Monadius (initGameVariables,initGameObjects)
     where
       initGameVariables = initVs
       initGameObjects =
-          stars ++ [initialVicViper,freshPowerUpGauge,freshShootingStar]
-      -- The temporary direct stage-2 start is for caption tuning; place the
-      -- ship at the left edge so the reference composition is easy to check.
-      initialVicViper = if baseGameLevel initVs == 2
-        then freshVicViper{position = (-280):+0}
-        else freshVicViper
+          stars ++ [freshVicViper,freshPowerUpGauge,freshShootingStar]
       stars = take 26 $ map (\(t,i) -> Star{tag=Nothing,position = (fix 320 t:+fix 201 t),particleColor=colors!!i}) $ zip (map (\x -> square x + x + 41) [2346,19091..]) [1..]
       fix :: Int -> Int -> GLdouble
       fix limit value = intToGLdouble $ (value `mod` (2*limit) - limit)
@@ -1433,6 +1429,7 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   mapM_ renderGameObject $ filter isLandscape objects
   mapM_ renderGameObject $ filter (not . isGauge) $ filter (not . isLandscape) objects
   renderStageTwoCaption stageWidth stageHeight
+  renderStageThreeCaption stageWidth stageHeight
   -- Particles leave an additive blend equation active.  With that equation a
   -- black source contributes nothing, so restore ordinary alpha compositing
   -- before drawing the opaque HUD backing.
@@ -1487,6 +1484,16 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
           | otherwise       = 1 - intToGLdouble (gameclock - 120) / 60
     c_renderStageTwoCaption (realToFrac captionAlpha) (fromIntegral width) (fromIntegral height)
   showCaption = baseGameLevel variables == 2 && gameclock < 180
+
+  -- Reveal 「死ぬがよい。」 at five characters per second, then remove it
+  -- abruptly at the three-second mark.
+  renderStageThreeCaption :: Int -> Int -> IO ()
+  renderStageThreeCaption width height = when showCaption $ do
+    let revealedCharacters = min 6 (gameclock `div` 12 + 1)
+    c_renderStageThreeCaption (fromIntegral revealedCharacters)
+      (fromIntegral width) (fromIntegral height)
+    where
+      showCaption = baseGameLevel variables == 3 && gameclock < 180
 
   isLandscape :: GameObject -> Bool
   isLandscape LandScapeBlock{} = True

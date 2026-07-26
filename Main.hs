@@ -272,7 +272,7 @@ openingProc shieldTextures ses sounds clock menuCursor vars ks = do
 
   if Char ' ' `elem` keystate && clock >= timeLimit then
      if menuCursor == 0 then
-       gameStart 2 0 False (recorderMode vars) vars
+       gameStart 1 0 False (recorderMode vars) vars
      else
        gameStart savedLevel savedArea (isCheat vars) (recorderMode vars) vars
    else if isJust $ getNumberKey keystate then

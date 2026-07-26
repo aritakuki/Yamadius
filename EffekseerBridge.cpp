@@ -3,12 +3,14 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace {
 constexpr int kEffectTerm = 160;
@@ -38,7 +40,9 @@ struct Glyph {
 
 FT_Library subtitleFontLibrary = nullptr;
 FT_Face subtitleFontFace = nullptr;
+FT_Face stageThreeFontFace = nullptr;
 std::map<unsigned long, Glyph> subtitleGlyphs;
+std::map<unsigned long, Glyph> stageThreeGlyphs;
 
 void initializeSubtitleFont() {
   if (FT_Init_FreeType(&subtitleFontLibrary) != 0) return;
@@ -51,15 +55,22 @@ void initializeSubtitleFont() {
     return;
   }
   FT_Set_Pixel_Sizes(subtitleFontFace, 0, 30);
+  if (FT_New_Face(subtitleFontLibrary, "/usr/share/fonts/takao/TakaoMincho.ttf",
+                  0, &stageThreeFontFace) == 0) {
+    FT_Set_Pixel_Sizes(stageThreeFontFace, 0, 44);
+  } else {
+    stageThreeFontFace = nullptr;
+  }
 }
 
-const Glyph* subtitleGlyph(unsigned long codepoint) {
-  if (subtitleFontFace == nullptr) return nullptr;
-  const auto cached = subtitleGlyphs.find(codepoint);
-  if (cached != subtitleGlyphs.end()) return &cached->second;
-  if (FT_Load_Char(subtitleFontFace, codepoint, FT_LOAD_RENDER) != 0) return nullptr;
+const Glyph* fontGlyph(FT_Face face, std::map<unsigned long, Glyph>& glyphs,
+                       unsigned long codepoint) {
+  if (face == nullptr) return nullptr;
+  const auto cached = glyphs.find(codepoint);
+  if (cached != glyphs.end()) return &cached->second;
+  if (FT_Load_Char(face, codepoint, FT_LOAD_RENDER) != 0) return nullptr;
 
-  const FT_GlyphSlot glyph = subtitleFontFace->glyph;
+  const FT_GlyphSlot glyph = face->glyph;
   Glyph rendered;
   rendered.width = glyph->bitmap.width;
   rendered.height = glyph->bitmap.rows;
@@ -75,7 +86,15 @@ const Glyph* subtitleGlyph(unsigned long codepoint) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  return &subtitleGlyphs.emplace(codepoint, rendered).first->second;
+  return &glyphs.emplace(codepoint, rendered).first->second;
+}
+
+const Glyph* subtitleGlyph(unsigned long codepoint) {
+  return fontGlyph(subtitleFontFace, subtitleGlyphs, codepoint);
+}
+
+const Glyph* stageThreeGlyph(unsigned long codepoint) {
+  return fontGlyph(stageThreeFontFace, stageThreeGlyphs, codepoint);
 }
 
 float subtitleTextWidth(const std::string& text) {
@@ -102,6 +121,50 @@ float drawSubtitleText(const std::string& text, float x, float baseline) {
     x += glyph->advance >> 6;
   }
   return x;
+}
+
+std::vector<unsigned long> decodeUtf8(const char* text) {
+  std::vector<unsigned long> codepoints;
+  for (const unsigned char* cursor = reinterpret_cast<const unsigned char*>(text); *cursor;) {
+    if ((*cursor & 0x80) == 0) {
+      codepoints.push_back(*cursor++);
+    } else if ((*cursor & 0xe0) == 0xc0) {
+      codepoints.push_back((cursor[0] & 0x1f) << 6 | (cursor[1] & 0x3f));
+      cursor += 2;
+    } else if ((*cursor & 0xf0) == 0xe0) {
+      codepoints.push_back((cursor[0] & 0x0f) << 12 | (cursor[1] & 0x3f) << 6 |
+                           (cursor[2] & 0x3f));
+      cursor += 3;
+    } else {
+      ++cursor;
+    }
+  }
+  return codepoints;
+}
+
+float stageThreeTextWidth(const std::vector<unsigned long>& text) {
+  float width = 0.0f;
+  for (const unsigned long codepoint : text) {
+    if (const Glyph* glyph = stageThreeGlyph(codepoint)) width += glyph->advance >> 6;
+  }
+  return width;
+}
+
+void drawStageThreeText(const std::vector<unsigned long>& text, float x, float baseline) {
+  for (const unsigned long codepoint : text) {
+    const Glyph* glyph = stageThreeGlyph(codepoint);
+    if (glyph == nullptr) continue;
+    const float left = x + glyph->bearing_x;
+    const float bottom = baseline - (glyph->height - glyph->bearing_y);
+    glBindTexture(GL_TEXTURE_2D, glyph->texture);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 1.0f); glVertex2f(left, bottom);
+    glTexCoord2f(1.0f, 1.0f); glVertex2f(left + glyph->width, bottom);
+    glTexCoord2f(1.0f, 0.0f); glVertex2f(left + glyph->width, bottom + glyph->height);
+    glTexCoord2f(0.0f, 0.0f); glVertex2f(left, bottom + glyph->height);
+    glEnd();
+    x += glyph->advance >> 6;
+  }
 }
 
 std::array<float, 3> normalize(const std::array<float, 3>& vector) {
@@ -235,6 +298,38 @@ extern "C" void renderStageTwoCaption(float alpha, int stageWidth, int stageHeig
   glPopAttrib();
 }
 
+extern "C" void renderStageThreeCaption(int revealedCharacters, int stageWidth,
+                                          int stageHeight) {
+  if (stageThreeFontFace == nullptr || revealedCharacters <= 0) return;
+  std::vector<unsigned long> caption = decodeUtf8(u8"死ぬがよい。");
+  caption.resize(std::min(static_cast<int>(caption.size()), revealedCharacters));
+
+  GLint matrixMode = GL_MODELVIEW;
+  glGetIntegerv(GL_MATRIX_MODE, &matrixMode);
+  glPushAttrib(GL_COLOR_BUFFER_BIT | GL_CURRENT_BIT | GL_ENABLE_BIT | GL_TEXTURE_BIT);
+  glMatrixMode(GL_PROJECTION);
+  glPushMatrix();
+  glLoadIdentity();
+  glOrtho(0.0, stageWidth, 0.0, stageHeight, -1.0, 1.0);
+  glMatrixMode(GL_MODELVIEW);
+  glPushMatrix();
+  glLoadIdentity();
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glEnable(GL_TEXTURE_2D);
+  glDisable(GL_DEPTH_TEST);
+  glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+  drawStageThreeText(caption,
+                     stageWidth * 0.5f - stageThreeTextWidth(caption) * 0.5f,
+                     stageHeight * 0.5f - 16.0f);
+  glMatrixMode(GL_MODELVIEW);
+  glPopMatrix();
+  glMatrixMode(GL_PROJECTION);
+  glPopMatrix();
+  glMatrixMode(matrixMode);
+  glPopAttrib();
+}
+
 void procEffekseer() {
   if (manager.Get() == nullptr || renderer.Get() == nullptr) return;
   if (effect.Get() != nullptr && effectTime == 0) {
@@ -276,9 +371,11 @@ void procEffekseer() {
 }
 
 void finishEffekseer() {
+  if (stageThreeFontFace != nullptr) FT_Done_Face(stageThreeFontFace);
   if (subtitleFontFace != nullptr) FT_Done_Face(subtitleFontFace);
   if (subtitleFontLibrary != nullptr) FT_Done_FreeType(subtitleFontLibrary);
   subtitleFontFace = nullptr;
+  stageThreeFontFace = nullptr;
   subtitleFontLibrary = nullptr;
   manager.Reset();
   renderer.Reset();
