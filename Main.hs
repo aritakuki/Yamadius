@@ -124,7 +124,14 @@ main = do
       backgroundMusic (bgm0 sounds)
 
       -- Keep the original 640x480 stage intact and add a 90px HUD strip.
-      initialWindowSize Graphics.UI.GLUT.$= Size 640 570
+      -- Start at the requested 1280x1040 size, centred on the display.
+      let initialWidth = 1280
+          initialHeight = 1040
+      Size screenWidth screenHeight <- get screenSize
+      initialWindowSize Graphics.UI.GLUT.$= Size initialWidth initialHeight
+      initialWindowPosition Graphics.UI.GLUT.$= Position
+        ((screenWidth - initialWidth) `div` 2)
+        ((screenHeight - initialHeight) `div` 2)
       initialDisplayMode Graphics.UI.GLUT.$= [RGBAMode,DoubleBuffered{-,WithDepthBuffer,WithAlphaComponent-}]
 --      initialize "" []
       wnd <- createWindow "Monadius"
