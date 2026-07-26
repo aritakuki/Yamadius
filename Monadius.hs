@@ -76,6 +76,7 @@ data GameVariables = GameVariables
     , nextTag       :: Int
     , gameClock     :: Int
     , baseGameLevel :: Int
+    , stageEntranceFrames :: Int
     , playTitle     :: Maybe String
     }
     deriving Eq
@@ -573,7 +574,9 @@ updateMonadius realKeys (Monadius (variables,objects))
   bacterianShotSpeed = bacterianShotSpeedList!!gameLevel
 
 
-  keys = if hp vicViper<=0 then [] else realKeys
+  -- The ship enters from the left before the first wave.  During this
+  -- sequence no player action, including firing and self-destruct, is used.
+  keys = if hp vicViper<=0 || stageEntranceFrames variables > 0 then [] else realKeys
    -- almost all operation dies when vicViper dies. use realKeys to fetch unaffected keystates.
 
   (newNextTag,newObjects) = issueTag (nextTag variables) $
@@ -640,6 +643,7 @@ updateMonadius realKeys (Monadius (variables,objects))
     flagGameover = flagGameover variables ||  ageAfterDeath vicViper > 240,
     gameClock = (\c -> if hp vicViper<=0 then c else if goNextStage then 0 else c+1) $ gameClock variables,
     baseGameLevel = (\l -> if goNextStage then l+1 else l) $ baseGameLevel variables,
+    stageEntranceFrames = max 0 (stageEntranceFrames variables - 1),
     totalScore = newScore,
     hiScore = max (hiScore variables) newScore
   }
@@ -656,7 +660,7 @@ updateMonadius realKeys (Monadius (variables,objects))
   --   or include nothing if the object has vanished.
 
   updateGameObject vic@VicViper{} = newShields ++ makeMetalionShots vic{
-    position=position vic + (vmag*(speed vic):+0) * (vx:+vy) ,
+    position=if enteringStage then stageEntrancePosition else position vic + (vmag*(speed vic):+0) * (vx:+vy) ,
     trail=(if isMoving then ((position vic-(10:+0)):) else id) $ trail vic,
     powerUpLevels =
       (modifyArray gaugeOfShield (const (if (shieldCount > 0) then 1 else 0))) $
@@ -688,6 +692,9 @@ updateMonadius realKeys (Monadius (variables,objects))
     shieldCount = sum $ map (\o -> case o of
       Shield{} -> 1
       _        -> 0) gameObjects
+    enteringStage = stageEntranceFrames variables > 0
+    stageEntrancePosition = (-340 + 340 * progress):+0
+    progress = intToGLdouble (121 - stageEntranceFrames variables) / 120
     newShields = if (doesPowerUp && powerUpPointer vic==gaugeOfShield ) then
 --    newShields = if (doesPowerUp && powerUpPointer vic==gaugeOfShield || gameClock variables == 0) then
 --      [freshShield{position=350:+260   ,placement=40:+shieldPlacementMargin,   angle=30,omega=10   },
@@ -1408,6 +1415,8 @@ newParticles n p v= do
 renderMonadius :: [GL.TextureObject] -> [Key] -> Monadius -> IO ()
 renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   putDebugStrLn $ show $ length objects
+  let playerX :+ playerY = position vicViper
+  c_setEffeksserPlayerPosition (realToFrac playerX) (realToFrac playerY)
   Size clientWidth clientHeight <- get windowSize
   let (stageX,stageY,stageWidth,stageHeight,hudHeight) = hudLayout clientWidth clientHeight
   -- Keep a 4:3 stage and add the HUD below it; both scale with the window.
@@ -1532,7 +1541,7 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
         scale (0.15 :: GLdouble) 0.13 0.15
         renderString Roman $ ["SPEED","MISSILE","DOUBLE","LASER","OPTION","  ?"]!!i
 
-  renderGameObject vic@VicViper{position = x:+y} = if hp vic<=0 then preservingMatrix $ do
+  renderGameObject vic@VicViper{position = x:+y} = if stageEntranceFrames variables > 0 && (stageEntranceFrames variables `div` 4) `mod` 2 == 0 then return () else if hp vic<=0 then preservingMatrix $ do
       translate (Vector3 x y 0)
       scale pishaMagnitudeX pishaMagnitudeY 0
       renderWithShade (Color3 (1.0 :: GLdouble) 0 0) (Color3 (1.0 :: GLdouble) 0.6 0.4) $ do

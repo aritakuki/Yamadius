@@ -84,7 +84,7 @@ void restartEffekseer(int kind) {
     case 4:  loadEffect("Params/warero.txt", u"Effects/warero.efk"); break;
     case 5:  loadEffect("Params/icchimae.txt", u"Effects/icchimae.efk"); break;
     case 6:  loadEffect("Params/kaze.txt", u"Effects/kaze.efk", kWindEffectTerm); break;
-    case 12: loadEffect("Params/open.txt", u"Effects/open.efk"); break;
+    case 12: loadEffect("Params/open.txt", u"Effects/open.efk", kEffectTerm, true); break;
     default: break;
   }
 }
@@ -130,6 +130,16 @@ void procEffekseer() {
     handle = manager->Play(effect, effectFollowsPlayer ? effectX : 0.0f,
                            effectFollowsPlayer ? effectY : 0.0f,
                            effectFollowsPlayer ? effectZ : 0.0f);
+  }
+  if (effect.Get() != nullptr && effectFollowsPlayer) {
+    constexpr float kScreenToEffectScale = 1.0f / 40.0f;
+    const float effectX = cameraTarget[0] + kScreenToEffectScale *
+        (cameraRight[0] * playerScreenX + cameraUp[0] * playerScreenY);
+    const float effectY = cameraTarget[1] + kScreenToEffectScale *
+        (cameraRight[1] * playerScreenX + cameraUp[1] * playerScreenY);
+    const float effectZ = cameraTarget[2] + kScreenToEffectScale *
+        (cameraRight[2] * playerScreenX + cameraUp[2] * playerScreenY);
+    manager->SetLocation(handle, effectX, effectY, effectZ);
   }
   if (effect.Get() != nullptr && effectTime == effectTerm - 1) {
     manager->StopEffect(handle);
