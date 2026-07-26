@@ -60,6 +60,8 @@ import Control.Monad.Fix (fix)
 foreign import ccall "_Z13initEffekseerii" c_initEffeksser :: CInt -> CInt -> IO ()
 foreign import ccall "_Z15finishEffekseerv" c_finishEffeksser :: IO ()
 foreign import ccall "_Z13procEffekseerv" c_procEffeksser :: IO ()
+foreign import ccall "_Z16restartEffekseeri" c_restartEffeksser :: CInt -> IO ()
+foreign import ccall "setEffekseerPlayerPosition" c_setEffeksserPlayerPosition :: CFloat -> CFloat -> IO ()
 
 data GlobalVariables = GlobalVariables{
   saveState :: (Int,Int) ,isCheat :: Bool, demoIndex :: Int,
@@ -290,13 +292,24 @@ openingProc shieldTextures ses sounds clock menuCursor vars ks = do
      gameStart level area ischeat recordermode vrs = do
        stopMusic sounds
        playSound (start ses)
-       backgroundMusic (bgm1 sounds)
+       backgroundMusic (stageMusic level)
       -- it is possible to temporary set (recordermode /= recorderMode vars)
        gs <- newIORef $ initialRecorder recordermode (playbackKeys vrs) (initialMonadius GameVariables{
        totalScore=0, flagGameover=False,  hiScore=saveHiScore vrs,
        nextTag=0, gameClock = savePoints!!area ,baseGameLevel = level,
+       stageEntranceFrames = if level == 1 then 120 else 0,
        playTitle = if recordermode /= Playback then Nothing else playBackName vrs})
+       when (level == 1) $ do
+         c_setEffeksserPlayerPosition (-340) 0
+         c_restartEffeksser 12
+         playSound (efopen ses)
        return $ Scene $ mainProc shieldTextures ses sounds vrs{isCheat=ischeat,recordSaveState=(level,area)} gs ks
+
+     stageMusic level = case level of
+       1 -> bgm1 sounds
+       2 -> bgm2 sounds
+       3 -> bgm3 sounds
+       _ -> bgm1 sounds
 
      (savedLevel,savedArea) = saveState vars
 
