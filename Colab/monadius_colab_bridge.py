@@ -33,13 +33,17 @@ const bgm = document.getElementById('bgm');
 const held = new Set();
 const releases = new Map();
 const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
-               ' ':'space', a:'a', A:'a', f:'f', F:'f', g:'g', G:'g'};
+               ' ':'space', Space:'space', Spacebar:'space',
+               a:'a', A:'a', f:'f', F:'f', g:'g', G:'g'};
 function send() {
   const value = [...held].join(' ');
   state.textContent = 'keys: ' + (value || 'none');
   fetch('/keys?value=' + encodeURIComponent(value), {cache:'no-store'});
 }
-function token(e) { return names[e.key] || (/^[0-9]$/.test(e.key) ? e.key : null); }
+function token(e) {
+  return names[e.key] || (e.code === 'Space' ? 'space' : null) ||
+         (/^[0-9]$/.test(e.key) ? e.key : null);
+}
 // Main polls a file once per frame, unlike GLUT's native key-down callback.
 // Retain a released key briefly so a normal tap (especially Space on title)
 // cannot occur entirely between two polls.  Held movement keys remain held.
