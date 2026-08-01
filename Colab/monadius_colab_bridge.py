@@ -31,6 +31,7 @@ const screen = document.getElementById('screen');
 const state = document.getElementById('state');
 const bgm = document.getElementById('bgm');
 const held = new Set();
+const releases = new Map();
 const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
                ' ':'space', a:'a', A:'a', f:'f', F:'f', g:'g', G:'g'};
 function send() {
@@ -39,8 +40,15 @@ function send() {
   fetch('/keys?value=' + encodeURIComponent(value), {cache:'no-store'});
 }
 function token(e) { return names[e.key] || (/^[0-9]$/.test(e.key) ? e.key : null); }
-addEventListener('keydown', e => { const k = token(e); if (k) { held.add(k); send(); e.preventDefault(); }});
-addEventListener('keyup', e => { const k = token(e); if (k) { held.delete(k); send(); e.preventDefault(); }});
+// Main polls a file once per frame, unlike GLUT's native key-down callback.
+// Retain a released key briefly so a normal tap (especially Space on title)
+// cannot occur entirely between two polls.  Held movement keys remain held.
+addEventListener('keydown', e => { const k = token(e); if (k) {
+  clearTimeout(releases.get(k)); held.add(k); send(); e.preventDefault();
+}});
+addEventListener('keyup', e => { const k = token(e); if (k) {
+  releases.set(k, setTimeout(() => { held.delete(k); send(); }, 120)); e.preventDefault();
+}});
 addEventListener('blur', () => { held.clear(); send(); });
 screen.addEventListener('click', () => { screen.focus(); bgm.play().catch(() => {}); });
 setInterval(() => { screen.src = '/frame.jpg?t=' + Date.now(); }, 1000 / 20);
