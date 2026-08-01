@@ -4,6 +4,12 @@
 #include <cstring>
 #include <cstdio>
 
+using GetStringProc = const GLubyte* (*)(GLenum);
+using BeginProc = void (*)(GLenum);
+using Vertex2fProc = void (*)(GLfloat, GLfloat);
+using EndProc = void (*)();
+using GetErrorProc = GLenum (*)();
+
 int main() {
   // Do not use EGL_DEFAULT_DISPLAY: on a headless VM it may select Mesa's
   // software renderer.  Ask EGL for the physical devices and explicitly
@@ -49,10 +55,24 @@ int main() {
   EGLSurface s = eglCreatePbufferSurface(d, config, size);
   EGLContext c = eglCreateContext(d, config, EGL_NO_CONTEXT, nullptr);
   if (s == EGL_NO_SURFACE || c == EGL_NO_CONTEXT || !eglMakeCurrent(d,s,s,c)) return 7;
+
+  // Do not link against libGL/libOpenGL.  Colab's GLVND installation can
+  // contain a Mesa library with an unresolved internal _glapi symbol even
+  // though NVIDIA's EGL is usable.  EGL is the owner of this context, so its
+  // proc-address loader gives us the OpenGL entry points directly.
+  auto getString = reinterpret_cast<GetStringProc>(eglGetProcAddress("glGetString"));
+  auto begin = reinterpret_cast<BeginProc>(eglGetProcAddress("glBegin"));
+  auto vertex2f = reinterpret_cast<Vertex2fProc>(eglGetProcAddress("glVertex2f"));
+  auto end = reinterpret_cast<EndProc>(eglGetProcAddress("glEnd"));
+  auto getError = reinterpret_cast<GetErrorProc>(eglGetProcAddress("glGetError"));
+  if (!getString || !begin || !vertex2f || !end || !getError) {
+    std::fprintf(stderr, "OpenGL compatibility entry points are unavailable\n");
+    return 8;
+  }
   std::printf("EGL_VENDOR=%s\nGL_VENDOR=%s\nGL_RENDERER=%s\nGL_VERSION=%s\n",
-    eglQueryString(d,EGL_VENDOR), glGetString(GL_VENDOR), glGetString(GL_RENDERER), glGetString(GL_VERSION));
-  glBegin(GL_TRIANGLES); glVertex2f(0,0); glVertex2f(1,0); glVertex2f(0,1); glEnd();
-  const GLenum error = glGetError();
+    eglQueryString(d,EGL_VENDOR), getString(GL_VENDOR), getString(GL_RENDERER), getString(GL_VERSION));
+  begin(GL_TRIANGLES); vertex2f(0,0); vertex2f(1,0); vertex2f(0,1); end();
+  const GLenum error = getError();
   std::printf("FIXED_FUNCTION_GL_ERROR=%u\n", error);
-  return error == GL_NO_ERROR ? 0 : 8;
+  return error == GL_NO_ERROR ? 0 : 9;
 }
