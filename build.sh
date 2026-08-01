@@ -27,6 +27,15 @@ if [[ ! -f "$EFFEKSEER_PREFIX/lib/libEffekseer.a" ]]; then
   exit 2
 fi
 
+# Colab's libGL development linker stub comes from Mesa and may retain an
+# internal _glapi reference even when the runtime context is NVIDIA EGL.  The
+# executable resolves it through the NVIDIA GLVND driver at runtime; do not
+# reject that shared-library reference while linking the Haskell binary.
+LINKER_OPTIONS=()
+if [[ "${MONADIUS_COLAB_EGL:-}" == "1" ]]; then
+  LINKER_OPTIONS+=( -optl-Wl,--allow-shlib-undefined )
+fi
+
 ghc -lstdc++ \
   -package JuicyPixels -package vector -package random \
   -optc-I"$EFFEKSEER_PREFIX/include" \
@@ -37,4 +46,4 @@ ghc -lstdc++ \
   "$GLEW_LIBRARY" -lEffekseer -lEffekseerRendererGL "$GLFW_LIBRARY" \
   -lfreetype -lpthread -lEffekseer -lEffekseerRendererGL \
   -lSM -lICE -lXext -lrt -lm -lXrandr -lXinerama -lXi -lXxf86vm -lXcursor \
-  -lGL -lGLU -lEGL -ljpeg -ldl -lX11
+  -lGL -lGLU -lEGL -ljpeg -ldl -lX11 "${LINKER_OPTIONS[@]}"
