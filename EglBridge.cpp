@@ -68,6 +68,29 @@ extern "C" int saveEglFrame(const char* filename) {
   std::vector<unsigned char> rgb(static_cast<size_t>(frameWidth) * frameHeight * 3);
   glPixelStorei(GL_PACK_ALIGNMENT, 1);
   glReadPixels(0, 0, frameWidth, frameHeight, GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
+
+  // EGL pbuffers are allowed to expose a front or back color buffer.  The
+  // game renders to the default buffer, while glReadPixels reads the current
+  // read buffer.  Prefer that normal path, but when it is completely black,
+  // also inspect GL_BACK and use it if it contains the rendered frame.
+  const auto energy = [](const std::vector<unsigned char>& pixels) {
+    size_t total = 0;
+    for (unsigned char value : pixels) total += value;
+    return total;
+  };
+  const size_t normalEnergy = energy(rgb);
+  if (normalEnergy == 0) {
+    GLint readBuffer = GL_FRONT;
+    glGetIntegerv(GL_READ_BUFFER, &readBuffer);
+    glReadBuffer(GL_BACK);
+    if (glGetError() == GL_NO_ERROR) {
+      std::vector<unsigned char> back(rgb.size());
+      glReadPixels(0, 0, frameWidth, frameHeight, GL_RGB, GL_UNSIGNED_BYTE, back.data());
+      if (glGetError() == GL_NO_ERROR && energy(back) > normalEnergy) rgb.swap(back);
+    }
+    glReadBuffer(readBuffer);
+    glGetError(); // discard an unsupported-buffer error on single-buffer pbuffers
+  }
   FILE* file = std::fopen(filename, "wb");
   if (!file) return 0;
   jpeg_compress_struct jpeg{};
