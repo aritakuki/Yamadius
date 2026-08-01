@@ -116,11 +116,10 @@ main = do
   args <- getArgs
   putDebugStrLn $ show args
   eglMode <- isJust <$> lookupEnv "MONADIUS_EGL"
-  -- GLUT cannot be initialised without an X display.  Colab instead creates
-  -- the OpenGL compatibility context in EglBridge.cpp.
-  if eglMode then return () else do
-    _ <- getArgsAndInitialize
-    return ()
+  -- Colab's runner supplies a tiny Xvfb solely so freeglut can initialise its
+  -- built-in stroke-font data.  The actual rendering context is still the
+  -- NVIDIA EGL pbuffer created below; no GLUT window or GLX context is made.
+  _ <- getArgsAndInitialize
   keystate <- newIORef []
   -- In a normal desktop run GLUT owns the keyboard.  In Colab there is no
   -- desktop window for the browser to focus, so the small local bridge writes
