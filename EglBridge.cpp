@@ -1,7 +1,9 @@
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <GL/gl.h>
 
 #include <cstddef>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -14,10 +16,35 @@ EGLSurface surface = EGL_NO_SURFACE;
 EGLContext context = EGL_NO_CONTEXT;
 int frameWidth = 0;
 int frameHeight = 0;
+
+EGLDisplay nvidiaDisplay() {
+  auto queryDevices = reinterpret_cast<PFNEGLQUERYDEVICESEXTPROC>(
+      eglGetProcAddress("eglQueryDevicesEXT"));
+  auto queryDeviceString = reinterpret_cast<PFNEGLQUERYDEVICESTRINGEXTPROC>(
+      eglGetProcAddress("eglQueryDeviceStringEXT"));
+  auto getPlatformDisplay = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
+      eglGetProcAddress("eglGetPlatformDisplayEXT"));
+  if (!queryDevices || !getPlatformDisplay) return EGL_NO_DISPLAY;
+
+  EGLDeviceEXT devices[16];
+  EGLint count = 0;
+  if (!queryDevices(16, devices, &count) || count == 0) return EGL_NO_DISPLAY;
+  EGLDeviceEXT selected = EGL_NO_DEVICE_EXT;
+  for (EGLint i = 0; queryDeviceString && i < count; ++i) {
+    const char* vendor = queryDeviceString(devices[i], EGL_VENDOR);
+    if (vendor && std::strstr(vendor, "NVIDIA")) selected = devices[i];
+  }
+  // Colab's NVIDIA 580 driver may not expose optional device-name strings.
+  // The runner supplies an NVIDIA-only GLVND vendor JSON, so its sole EGL
+  // device is still unambiguously the Tesla GPU.
+  if (selected == EGL_NO_DEVICE_EXT && count == 1) selected = devices[0];
+  if (selected == EGL_NO_DEVICE_EXT) return EGL_NO_DISPLAY;
+  return getPlatformDisplay(EGL_PLATFORM_DEVICE_EXT, selected, nullptr);
+}
 }
 
 extern "C" int initEglRenderer(int width, int height) {
-  display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+  display = nvidiaDisplay();
   if (display == EGL_NO_DISPLAY || !eglInitialize(display, nullptr, nullptr)) return 0;
   if (!eglBindAPI(EGL_OPENGL_API)) return 0;
   const EGLint configAttributes[] = {
@@ -63,6 +90,11 @@ extern "C" int saveEglFrame(const char* filename) {
   jpeg_destroy_compress(&jpeg);
   std::fclose(file);
   return 1;
+}
+
+extern "C" void presentMonadiusFrame() {
+  const char* filename = std::getenv("MONADIUS_FRAME_FILE");
+  if (context != EGL_NO_CONTEXT && filename && *filename) saveEglFrame(filename);
 }
 
 extern "C" void finishEglRenderer() {

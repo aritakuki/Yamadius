@@ -59,6 +59,14 @@ foreign import ccall "_Z15finishEffekseerv" c_finishEffeksser :: IO ()
 foreign import ccall "_Z13procEffekseerv" c_procEffeksser :: IO ()
 foreign import ccall "_Z16restartEffekseeri" c_restartEffeksser :: CInt -> IO ()
 foreign import ccall "setEffekseerPlayerPosition" c_setEffeksserPlayerPosition :: CFloat -> CFloat -> IO ()
+foreign import ccall "initEglRenderer" c_initEglRenderer :: CInt -> CInt -> IO CInt
+foreign import ccall "finishEglRenderer" c_finishEglRenderer :: IO ()
+foreign import ccall "presentMonadiusFrame" c_presentMonadiusFrame :: IO ()
+
+presentFrame :: IO ()
+presentFrame = do
+  eglMode <- isJust <$> lookupEnv "MONADIUS_EGL"
+  if eglMode then c_presentMonadiusFrame else swapBuffers
 
 data GlobalVariables = GlobalVariables{
   saveState :: (Int,Int) ,isCheat :: Bool, demoIndex :: Int,
@@ -107,7 +115,12 @@ main :: IO ()
 main = do
   args <- getArgs
   putDebugStrLn $ show args
-  _ <- getArgsAndInitialize
+  eglMode <- isJust <$> lookupEnv "MONADIUS_EGL"
+  -- GLUT cannot be initialised without an X display.  Colab instead creates
+  -- the OpenGL compatibility context in EglBridge.cpp.
+  if eglMode then return () else do
+    _ <- getArgsAndInitialize
+    return ()
   keystate <- newIORef []
   -- In a normal desktop run GLUT owns the keyboard.  In Colab there is no
   -- desktop window for the browser to focus, so the small local bridge writes
@@ -129,61 +142,60 @@ main = do
 
       backgroundMusic (bgm0 sounds)
 
-      -- Keep the original 640x480 stage intact and add a 90px HUD strip.
-      -- Start at the requested 1280x1040 size, centred on the display.
       let initialWidth = 1280
           initialHeight = 1040
-      Size screenWidth screenHeight <- get screenSize
-      initialWindowSize Graphics.UI.GLUT.$= Size initialWidth initialHeight
-      initialWindowPosition Graphics.UI.GLUT.$= Position
-        ((screenWidth - initialWidth) `div` 2)
-        ((screenHeight - initialHeight) `div` 2)
-      initialDisplayMode Graphics.UI.GLUT.$= [RGBAMode,DoubleBuffered{-,WithDepthBuffer,WithAlphaComponent-}]
---      initialize "" []
-      wnd <- createWindow "Monadius"
+      let setupScene = do
+            c_initEffeksser 640 480
+            shieldTextures <- mapM loadTextureFromFile
+              [ "Resources/force-field-frame-0.png"
+              , "Resources/force-field-frame-1.png"
+              , "Resources/force-field-frame-2.png"
+              , "Resources/force-field-frame-3.png"
+              ]
+            GL.blend $= GL.Enabled
+            GL.blendFunc $= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
+            newIORef (openingProc shieldTextures ses sounds 0 0 GlobalVariables{saveState = (1,0) ,isCheat = False,
+              recorderMode=recMode,playbackKeys=keys,playbackSaveState = rss,recordSaveState=(1,0),demoIndex=0,
+              playBackName=repName,saveHiScore=0} keystate)
 
-      c_initEffeksser 640 480
-
-      shieldTextures <- mapM loadTextureFromFile
-        [ "Resources/force-field-frame-0.png"
-        , "Resources/force-field-frame-1.png"
-        , "Resources/force-field-frame-2.png"
-        , "Resources/force-field-frame-3.png"
-        ]
-      GL.blend $= GL.Enabled
-      GL.blendFunc $= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
-
-      cp <- newIORef (openingProc shieldTextures ses sounds 0 0 GlobalVariables{saveState = (1,0) ,isCheat = False,
-                                                     recorderMode=recMode,playbackKeys=keys,playbackSaveState = rss,recordSaveState=(1,0),demoIndex=0,
-                                                     playBackName=repName,saveHiScore=0} keystate)
-
-      curwnd <- if "-f" `elem` args then do
-        gameModeCapabilities Graphics.UI.GLUT.$= [
-            Where' GameModeWidth IsLessThan 650,
-            Where' GameModeHeight IsLessThan 500
-            --Where' GameModeBitsPerPlane IsEqualTo 32,
-            --Where' GameModeRefreshRate IsAtLeast 30,
-            --Where' GameModeNum IsAtLeast 2
-          ]
-        displayCallback Graphics.UI.GLUT.$= dispProc externalInputFile keystate cp
-        (wnd2,_) <- enterGameMode
-        destroyWindow wnd
-        return wnd2
+      if eglMode then do
+        ready <- c_initEglRenderer (fromIntegral initialWidth) (fromIntegral initialHeight)
+        unless (ready /= 0) $ error "Could not create the NVIDIA EGL renderer"
+        cp <- setupScene
+        initMatrixSize (Size initialWidth initialHeight)
+        let loop = do
+              dispProc externalInputFile keystate cp
+              threadDelay 16000
+              loop
+        loop
+        c_finishEffeksser
+        c_finishEglRenderer
        else do
-        return wnd
-
-      displayCallback Graphics.UI.GLUT.$= dispProc externalInputFile keystate cp
-      keyboardMouseCallback Graphics.UI.GLUT.$= Just (keyProc keystate)
-      reshapeCallback Graphics.UI.GLUT.$= Just (const initMatrix)
-      addTimerCallback 16 (timerProc (dispProc externalInputFile keystate cp))
-
-      initMatrix
-
-      mainLoop
-
-      destroyWindow curwnd
-
-      c_finishEffeksser
+        Size screenWidth screenHeight <- get screenSize
+        initialWindowSize Graphics.UI.GLUT.$= Size initialWidth initialHeight
+        initialWindowPosition Graphics.UI.GLUT.$= Position
+          ((screenWidth - initialWidth) `div` 2)
+          ((screenHeight - initialHeight) `div` 2)
+        initialDisplayMode Graphics.UI.GLUT.$= [RGBAMode,DoubleBuffered]
+        wnd <- createWindow "Monadius"
+        cp <- setupScene
+        curwnd <- if "-f" `elem` args then do
+          gameModeCapabilities Graphics.UI.GLUT.$= [
+              Where' GameModeWidth IsLessThan 650,
+              Where' GameModeHeight IsLessThan 500]
+          displayCallback Graphics.UI.GLUT.$= dispProc externalInputFile keystate cp
+          (wnd2,_) <- enterGameMode
+          destroyWindow wnd
+          return wnd2
+         else return wnd
+        displayCallback Graphics.UI.GLUT.$= dispProc externalInputFile keystate cp
+        keyboardMouseCallback Graphics.UI.GLUT.$= Just (keyProc keystate)
+        reshapeCallback Graphics.UI.GLUT.$= Just (const initMatrix)
+        addTimerCallback 16 (timerProc (dispProc externalInputFile keystate cp))
+        initMatrix
+        mainLoop
+        destroyWindow curwnd
+        c_finishEffeksser
 
       `catch` (\(SomeException err) ->
         hPutStrLn stderr ("Monadius terminated during initialisation: " ++ show err))
@@ -203,8 +215,10 @@ exitLoop :: IO a
 exitLoop = exitSuccess
 
 initMatrix :: IO ()
-initMatrix = do
-  Size width height <- get windowSize
+initMatrix = get windowSize >>= initMatrixSize
+
+initMatrixSize :: Size -> IO ()
+initMatrixSize (Size width height) = do
   viewport Graphics.UI.GLUT.$= (Position 0 0,Size width height)
   matrixMode Graphics.UI.GLUT.$= Projection
   loadIdentity
@@ -297,7 +311,7 @@ openingProc shieldTextures ses sounds clock menuCursor vars ks = do
       renderStringGrad Roman (25 + i*5) strB
     ) $ zip3 [0,(-35)..] instructions [1..]
 
-  swapBuffers
+  presentFrame
 
   if Char ' ' `elem` keystate && clock >= timeLimit then
      if menuCursor == 0 then
@@ -397,7 +411,7 @@ endingProc shieldTextures ses sounds vars ks ctr= do
     renderString Roman str)
     stuffRoll [0,60..]
 
-  swapBuffers
+  presentFrame
 
   if Char ' ' `elem` keystate then do
       return $ Scene $ openingProc shieldTextures ses sounds 0 1 vars ks
@@ -457,7 +471,7 @@ mainProc shieldTextures ses sounds vars gs ks = do
 
   c_procEffeksser
 
-  swapBuffers
+  presentFrame
   let currentLevel = baseGameLevel$getVariables$gameBody gamestate
   let currentArea = maximum $ filter (\i -> (savePoints !! i) < (gameClock $ getVariables $ gameBody gamestate)) [0..(length savePoints-1)]
   let currentSave = if mode gamestate == Playback then saveState vars else (currentLevel,currentArea)
