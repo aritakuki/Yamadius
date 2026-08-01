@@ -33,11 +33,7 @@ import           System.Random
 import           Game
 import           Util
 
-import           Codec.Picture.Repa
 import           Control.Applicative
-import           Data.Array.Repa                 as R hiding (Array, Shape, map,
-                                                       reshape, size, (!), (++))
-import qualified Data.Array.Repa.Repr.ForeignPtr as RF
 import           Data.Word
 import           Foreign.ForeignPtr
 import           Foreign.C.Types             (CFloat (..), CInt (..))

@@ -12,8 +12,8 @@
 module Main (main) where
 
 import           Control.Exception  (SomeException (..), catch)
-import           Control.Monad      (mplus, zipWithM_, liftM)
-import           Codec.Picture.Repa
+import           Control.Monad      (mplus, zipWithM_)
+import qualified Codec.Picture       as JP
 import           Control.Applicative
 import           Data.Complex
 import           Data.IORef
@@ -21,13 +21,10 @@ import           Data.List
 import           Data.Maybe
 import           Graphics.UI.GLUT   hiding (position)
 import           System.Directory   (createDirectoryIfMissing, doesFileExist)
-import           System.Environment (getArgs, getEnv)
+import           System.Environment (getArgs, getEnv, lookupEnv)
 import           System.Exit        (exitSuccess)
 import qualified Graphics.Rendering.OpenGL.GL    as GL
-import           Data.Array.Repa                 as R hiding (Array, Shape, map,
-                                                       reshape, size, (!), (++))
-import qualified Data.Array.Repa.Repr.ForeignPtr as RF
-import           Foreign.ForeignPtr
+import qualified Data.Vector.Storable             as VS
 import           Data.Array                      (Array, array, (!))
 import           Data.Complex
 import           Data.List
@@ -87,15 +84,16 @@ loadReplay filename = readFile filename >>= (return . read)
 -- FreeGameのサンプルをちょっといじったもの
 loadTextureFromFile :: FilePath -> IO GL.TextureObject
 loadTextureFromFile path = do
-    content <- delay <$> (flipVertically.imgData) <$> either error id <$> (readImageRGBA path)
-    -- Repa images are laid out as (height, width, channels), while OpenGL
-    -- expects TextureSize2D width height.
-    let (Z :. height :. width :. _) = R.extent content
+    decoded <- either error return =<< JP.readImage path
+    let source = JP.convertRGBA8 decoded
+        content = JP.generateImage (\x y -> JP.pixelAt source x (JP.imageHeight source - y - 1))
+                                   (JP.imageWidth source) (JP.imageHeight source) :: JP.Image JP.PixelRGBA8
+        width = JP.imageWidth content
+        height = JP.imageHeight content
     [tex] <- GL.genObjectNames 1
     GL.textureBinding GL.Texture2D GL.$= Just tex
     GL.textureFilter Texture2D $= ((Nearest, Nothing), Nearest)
-    fptr <- liftM RF.toForeignPtr $ R.computeP $ content
-    withForeignPtr fptr
+    VS.unsafeWith (JP.imageData content)
         $ GL.texImage2D Texture2D GL.NoProxy 0 GL.RGBA8 (GL.TextureSize2D (gsizei width) (gsizei height)) 0
         . GL.PixelData GL.RGBA GL.UnsignedByte
     return tex
@@ -110,6 +108,11 @@ main = do
   putDebugStrLn $ show args
   _ <- getArgsAndInitialize
   keystate <- newIORef []
+  -- In a normal desktop run GLUT owns the keyboard.  In Colab there is no
+  -- desktop window for the browser to focus, so the small local bridge writes
+  -- the currently-held keys to this file instead.  Keeping it optional means
+  -- the existing native keyboard path remains unchanged.
+  externalInputFile <- lookupEnv "MONADIUS_INPUT_FILE"
 
   withProgNameAndArgs runALUT $ \_ _ -> do
       sounds <- loadSounds
@@ -161,17 +164,17 @@ main = do
             --Where' GameModeRefreshRate IsAtLeast 30,
             --Where' GameModeNum IsAtLeast 2
           ]
-        displayCallback Graphics.UI.GLUT.$= dispProc cp
+        displayCallback Graphics.UI.GLUT.$= dispProc externalInputFile keystate cp
         (wnd2,_) <- enterGameMode
         destroyWindow wnd
         return wnd2
        else do
         return wnd
 
-      displayCallback Graphics.UI.GLUT.$= dispProc cp
+      displayCallback Graphics.UI.GLUT.$= dispProc externalInputFile keystate cp
       keyboardMouseCallback Graphics.UI.GLUT.$= Just (keyProc keystate)
       reshapeCallback Graphics.UI.GLUT.$= Just (const initMatrix)
-      addTimerCallback 16 (timerProc (dispProc cp))
+      addTimerCallback 16 (timerProc (dispProc externalInputFile keystate cp))
 
       initMatrix
 
@@ -181,7 +184,8 @@ main = do
 
       c_finishEffeksser
 
-      `catch` (\(SomeException _) -> return ())
+      `catch` (\(SomeException err) ->
+        hPutStrLn stderr ("Monadius terminated during initialisation: " ++ show err))
 
       where
         getReplayFilename [] = Nothing
@@ -206,11 +210,35 @@ initMatrix = do
   perspective 30.0 (fromIntegral width / fromIntegral height) 600 1400
   lookAt (Vertex3 0 0 (927 :: GLdouble)) (Vertex3 0 0 (0 :: GLdouble)) (Vector3 0 1 (0 :: GLdouble))
 
-dispProc :: IORef (IO Scene) -> IO ()
-dispProc cp = do
+dispProc :: Maybe FilePath -> IORef [Key] -> IORef (IO Scene) -> IO ()
+dispProc externalInputFile keystate cp = do
+  refreshExternalKeys externalInputFile keystate
   m <- readIORef cp
   Scene next <- m
   writeIORef cp next
+
+-- | Read the key set maintained by the Colab browser bridge.  The file holds
+-- whitespace-separated tokens such as "left up a"; it is deliberately a
+-- tiny, dependency-free protocol so the game itself needs no web libraries.
+refreshExternalKeys :: Maybe FilePath -> IORef [Key] -> IO ()
+refreshExternalKeys Nothing _ = return ()
+refreshExternalKeys (Just filename) keystate = do
+  exists <- doesFileExist filename
+  when exists $ do
+    contents <- readFile filename `catch` (\(SomeException _) -> return "")
+    writeIORef keystate (nub (mapMaybe externalKey (words contents)))
+  where
+    externalKey token = case token of
+      "left"  -> Just (SpecialKey KeyLeft)
+      "right" -> Just (SpecialKey KeyRight)
+      "up"    -> Just (SpecialKey KeyUp)
+      "down"  -> Just (SpecialKey KeyDown)
+      "space" -> Just (Char ' ')
+      "a"     -> Just (Char 'a')
+      "f"     -> Just (Char 'f')
+      "g"     -> Just (Char 'g')
+      [digit] | digit >= '0' && digit <= '9' -> Just (Char digit)
+      _ -> Nothing
 
 -- | Scene is something that does some IO,
 -- then returns the Scene that are to be executed in next frame.
