@@ -33,17 +33,13 @@ const bgm = document.getElementById('bgm');
 const held = new Set();
 const releases = new Map();
 const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
-               ' ':'space', Space:'space', Spacebar:'space',
-               a:'a', A:'a', f:'f', F:'f', g:'g', G:'g'};
+               ' ':'space', a:'a', A:'a', f:'f', F:'f', g:'g', G:'g'};
 function send() {
   const value = [...held].join(' ');
   state.textContent = 'keys: ' + (value || 'none');
   fetch('/keys?value=' + encodeURIComponent(value), {cache:'no-store'});
 }
-function token(e) {
-  return names[e.key] || (e.code === 'Space' ? 'space' : null) ||
-         (/^[0-9]$/.test(e.key) ? e.key : null);
-}
+function token(e) { return names[e.key] || (/^[0-9]$/.test(e.key) ? e.key : null); }
 // Main polls a file once per frame, unlike GLUT's native key-down callback.
 // Retain a released key briefly so a normal tap (especially Space on title)
 // cannot occur entirely between two polls.  Held movement keys remain held.
@@ -98,12 +94,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_error(404)
 
 
-class LoopbackServer(socketserver.TCPServer):
-    # Fresh Start can follow a previous bridge immediately.  Allow binding the
-    # loopback port while its previous TCP connection is in TIME_WAIT.
-    allow_reuse_address = True
-
-
 def write_atomically(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False) as stream:
@@ -123,7 +113,7 @@ def main() -> None:
     Handler.input_file = args.input_file
     Handler.audio_file = args.audio_file
     write_atomically(args.input_file, "")
-    with LoopbackServer(("127.0.0.1", args.port), Handler) as server:
+    with socketserver.TCPServer(("127.0.0.1", args.port), Handler) as server:
         print(f"Monadius bridge listening on 127.0.0.1:{args.port}", flush=True)
         server.serve_forever()
 
