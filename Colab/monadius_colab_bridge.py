@@ -94,6 +94,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_error(404)
 
 
+class LoopbackServer(socketserver.TCPServer):
+    # Fresh Start can follow a previous bridge immediately.  Allow binding the
+    # loopback port while its previous TCP connection is in TIME_WAIT.
+    allow_reuse_address = True
+
+
 def write_atomically(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False) as stream:
@@ -113,7 +119,7 @@ def main() -> None:
     Handler.input_file = args.input_file
     Handler.audio_file = args.audio_file
     write_atomically(args.input_file, "")
-    with socketserver.TCPServer(("127.0.0.1", args.port), Handler) as server:
+    with LoopbackServer(("127.0.0.1", args.port), Handler) as server:
         print(f"Monadius bridge listening on 127.0.0.1:{args.port}", flush=True)
         server.serve_forever()
 
