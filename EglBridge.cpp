@@ -116,8 +116,13 @@ extern "C" int saveEglFrame(const char* filename) {
 }
 
 extern "C" void presentMonadiusFrame() {
+  if (context == EGL_NO_CONTEXT) return;
+  // Main's original GLUT path presents every completed scene with
+  // glutSwapBuffers.  EGL pbuffers may likewise expose a back buffer, so make
+  // that transition before reading the presented color buffer into JPEG.
+  eglSwapBuffers(display, surface);
   const char* filename = std::getenv("MONADIUS_FRAME_FILE");
-  if (context != EGL_NO_CONTEXT && filename && *filename) saveEglFrame(filename);
+  if (filename && *filename) saveEglFrame(filename);
 }
 
 extern "C" void finishEglRenderer() {
