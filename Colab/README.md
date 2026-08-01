@@ -20,7 +20,7 @@ on a workstation-specific absolute path.
 
 ```bash
 !apt-get -qq update
-!apt-get -qq install -y xvfb ffmpeg x11-apps mesa-utils freeglut3-dev libgl1-mesa-dev \
+!apt-get -qq install -y xserver-xorg-core ffmpeg x11-apps mesa-utils freeglut3-dev libgl1-mesa-dev \
   libglu1-mesa-dev libalut-dev libfreetype6-dev libglew-dev libglfw3-dev \
   libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libxcursor-dev \
   ghc cabal-install
@@ -62,9 +62,10 @@ from google.colab import output
 output.serve_kernel_port_as_iframe(8765, height=1100)
 ```
 
-Controls: arrow keys to move, `A` to shoot/use missile, `F` to power up,
-Space to start, and `G` for self-destruct.  The image transport is deliberately
-20 fps; the native simulation still retains its 16 ms timer.  The label at the
+Click the image once to start its browser-side BGM, then use arrow keys to
+move, `A` to shoot/use missile, `F` to power up, Space to start, and `G` for
+self-destruct.  The image transport is deliberately 20 fps; the native
+simulation still retains its 16 ms timer.  The label at the
 top of the game frame changes from `keys: none` while a key is held; if it does
 not, click the frame again so the iframe receives keyboard focus.
 

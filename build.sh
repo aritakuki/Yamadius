@@ -32,9 +32,9 @@ ghc -lstdc++ \
   -optc-I"$EFFEKSEER_PREFIX/include" \
   -optc-I"$EFFEKSEER_PREFIX/include/Effekseer" \
   -optc-I/usr/include/freetype2 \
-  --make Main.hs EffekseerBridge.cpp \
+  --make Main.hs EffekseerBridge.cpp EglBridge.cpp \
   -L"$EFFEKSEER_PREFIX/lib" -L"$EFFEKSEER_PREFIX/lib64" \
   "$GLEW_LIBRARY" -lEffekseer -lEffekseerRendererGL "$GLFW_LIBRARY" \
   -lfreetype -lpthread -lEffekseer -lEffekseerRendererGL \
   -lSM -lICE -lXext -lrt -lm -lXrandr -lXinerama -lXi -lXxf86vm -lXcursor \
-  -lGL -lGLU -ldl -lX11
+  -lGL -lGLU -lEGL -ljpeg -ldl -lX11

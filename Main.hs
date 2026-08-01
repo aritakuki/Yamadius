@@ -76,6 +76,7 @@ replayFileExtension = ".replay"
 presentationMode :: Bool
 presentationMode = True
 
+
 loadReplay :: String-> IO ReplayInfo
 loadReplay filename = readFile filename >>= (return . read)
 

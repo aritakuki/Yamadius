@@ -24,10 +24,12 @@ PAGE = """<!doctype html>
   #help { padding: 8px 12px; } #screen { display: block; width: 100%; max-width: 1280px; outline: none; }
 </style></head><body>
 <div id="help">Click the game, then use arrow keys, A (shot/missile), F (power-up), Space (start), G (self-destruct). <span id="state">keys: none</span></div>
+<audio id="bgm" controls loop src="/bgm.wav"></audio>
 <img id="screen" tabindex="0" alt="Monadius is starting…" src="/frame.jpg">
 <script>
 const screen = document.getElementById('screen');
 const state = document.getElementById('state');
+const bgm = document.getElementById('bgm');
 const held = new Set();
 const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
                ' ':'space', a:'a', A:'a', f:'f', F:'f', g:'g', G:'g'};
@@ -40,7 +42,7 @@ function token(e) { return names[e.key] || (/^[0-9]$/.test(e.key) ? e.key : null
 addEventListener('keydown', e => { const k = token(e); if (k) { held.add(k); send(); e.preventDefault(); }});
 addEventListener('keyup', e => { const k = token(e); if (k) { held.delete(k); send(); e.preventDefault(); }});
 addEventListener('blur', () => { held.clear(); send(); });
-screen.addEventListener('click', () => screen.focus());
+screen.addEventListener('click', () => { screen.focus(); bgm.play().catch(() => {}); });
 setInterval(() => { screen.src = '/frame.jpg?t=' + Date.now(); }, 1000 / 20);
 </script></body></html>"""
 
@@ -48,6 +50,7 @@ setInterval(() => { screen.src = '/frame.jpg?t=' + Date.now(); }, 1000 / 20);
 class Handler(http.server.BaseHTTPRequestHandler):
     frame_file: Path
     input_file: Path
+    audio_file: Path
 
     def log_message(self, _format: str, *_args: object) -> None:
         pass
@@ -73,6 +76,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(self.frame_file.read_bytes())
             return
+        if request.path == "/bgm.wav" and self.audio_file.is_file():
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(self.audio_file.read_bytes())
+            return
         self.send_error(404)
 
 
@@ -89,9 +99,11 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--frame-file", type=Path, required=True)
     parser.add_argument("--input-file", type=Path, required=True)
+    parser.add_argument("--audio-file", type=Path, required=True)
     args = parser.parse_args()
     Handler.frame_file = args.frame_file
     Handler.input_file = args.input_file
+    Handler.audio_file = args.audio_file
     write_atomically(args.input_file, "")
     with socketserver.TCPServer(("127.0.0.1", args.port), Handler) as server:
         print(f"Monadius bridge listening on 127.0.0.1:{args.port}", flush=True)

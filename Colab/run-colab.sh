@@ -21,7 +21,22 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-Xvfb "$DISPLAY_NUMBER" -screen 0 1280x1040x24 -nolisten tcp >"$RUNTIME_DIR/xvfb.log" 2>&1 &
+# A GPU runtime needs a real NVIDIA GLX server.  Xvfb always selects llvmpipe.
+# Xorg's empty-screen mode provides a headless NVIDIA display without VNC.
+cat >"$RUNTIME_DIR/xorg.conf" <<'EOF'
+Section "Device"
+  Identifier "NvidiaGPU"
+  Driver "nvidia"
+  Option "AllowEmptyInitialConfiguration" "true"
+EndSection
+Section "Screen"
+  Identifier "Screen0"
+  Device "NvidiaGPU"
+  DefaultDepth 24
+EndSection
+EOF
+Xorg "$DISPLAY_NUMBER" -noreset -nolisten tcp -config "$RUNTIME_DIR/xorg.conf" \
+  >"$RUNTIME_DIR/xorg.log" 2>&1 &
 XVFB_PID=$!
 sleep 1
 kill -0 "$XVFB_PID"
@@ -32,7 +47,8 @@ if command -v glxinfo >/dev/null 2>&1; then
 fi
 
 python3 "$ROOT_DIR/Colab/monadius_colab_bridge.py" \
-  --port "$PORT" --frame-file "$FRAME_FILE" --input-file "$INPUT_FILE" >"$RUNTIME_DIR/bridge.log" 2>&1 &
+  --port "$PORT" --frame-file "$FRAME_FILE" --input-file "$INPUT_FILE" \
+  --audio-file "$ROOT_DIR/BGM/bgm0.wav" >"$RUNTIME_DIR/bridge.log" 2>&1 &
 BRIDGE_PID=$!
 
 # Capture the X framebuffer after the game has rendered it.  The browser polls
@@ -47,7 +63,8 @@ cd "$ROOT_DIR"
 # existing ALUT sound initialisation alive without trying to open one.
 # Do not pass Monadius's legacy "-r" option here: GLUT parses process command
 # line flags before the game does, and headless freeglut may exit on it.
-DISPLAY="$DISPLAY_NUMBER" ALSOFT_DRIVERS=null MONADIUS_INPUT_FILE="$INPUT_FILE" ./Main >"$RUNTIME_DIR/game.log" 2>&1 &
+DISPLAY="$DISPLAY_NUMBER" ALSOFT_DRIVERS=null MONADIUS_INPUT_FILE="$INPUT_FILE" \
+  ./Main >"$RUNTIME_DIR/game.log" 2>&1 &
 GAME_PID=$!
 
 echo "Monadius is running.  In a Colab cell execute:"
