@@ -40,6 +40,13 @@ int main() {
       vendor ? vendor : "(unknown)", i, renderer ? renderer : "(unknown)");
     if (vendor && std::strstr(vendor, "NVIDIA")) nvidia = devices[i];
   }
+  // NVIDIA's 580 driver does not necessarily implement the optional
+  // EGL_EXT_device_query_name strings.  With a vendor JSON that names only
+  // NVIDIA, the one enumerated device is nevertheless the NVIDIA device.
+  if (!nvidia && deviceCount == 1) {
+    std::printf("EGL device name unavailable; using the only enumerated device\n");
+    nvidia = devices[0];
+  }
   if (!nvidia) {
     std::fprintf(stderr, "NVIDIA EGL device was not enumerated\n");
     return 4;
@@ -69,10 +76,17 @@ int main() {
     std::fprintf(stderr, "OpenGL compatibility entry points are unavailable\n");
     return 8;
   }
+  const char* glVendor = reinterpret_cast<const char*>(getString(GL_VENDOR));
+  const char* glRenderer = reinterpret_cast<const char*>(getString(GL_RENDERER));
   std::printf("EGL_VENDOR=%s\nGL_VENDOR=%s\nGL_RENDERER=%s\nGL_VERSION=%s\n",
-    eglQueryString(d,EGL_VENDOR), getString(GL_VENDOR), getString(GL_RENDERER), getString(GL_VERSION));
+    eglQueryString(d,EGL_VENDOR), glVendor, glRenderer, getString(GL_VERSION));
   begin(GL_TRIANGLES); vertex2f(0,0); vertex2f(1,0); vertex2f(0,1); end();
   const GLenum error = getError();
   std::printf("FIXED_FUNCTION_GL_ERROR=%u\n", error);
-  return error == GL_NO_ERROR ? 0 : 9;
+  if (error != GL_NO_ERROR) return 9;
+  if (!glVendor || !std::strstr(glVendor, "NVIDIA")) {
+    std::fprintf(stderr, "The current OpenGL context is not NVIDIA\n");
+    return 10;
+  }
+  return 0;
 }
