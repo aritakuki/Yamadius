@@ -1,6 +1,8 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#define GL_GLEXT_PROTOTYPES 1
 #include <GL/gl.h>
+#include <GL/glext.h>
 
 #include <cstddef>
 #include <cstring>
@@ -16,6 +18,9 @@ EGLSurface surface = EGL_NO_SURFACE;
 EGLContext context = EGL_NO_CONTEXT;
 int frameWidth = 0;
 int frameHeight = 0;
+GLuint frameBuffer = 0;
+GLuint frameTexture = 0;
+GLuint depthBuffer = 0;
 
 EGLDisplay nvidiaDisplay() {
   auto queryDevices = reinterpret_cast<PFNEGLQUERYDEVICESEXTPROC>(
@@ -60,37 +65,33 @@ extern "C" int initEglRenderer(int width, int height) {
       !eglMakeCurrent(display, surface, surface, context)) return 0;
   frameWidth = width;
   frameHeight = height;
+  glGenFramebuffers(1, &frameBuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
+  glGenTextures(1, &frameTexture);
+  glBindTexture(GL_TEXTURE_2D, frameTexture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, frameTexture, 0);
+  glGenRenderbuffers(1, &depthBuffer);
+  glBindRenderbuffer(GL_RENDERBUFFER, depthBuffer);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer);
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return 0;
+  glViewport(0, 0, width, height);
   return 1;
+}
+
+extern "C" void beginEglFrame() {
+  if (context != EGL_NO_CONTEXT) glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
 }
 
 extern "C" int saveEglFrame(const char* filename) {
   if (context == EGL_NO_CONTEXT) return 0;
+  glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
   std::vector<unsigned char> rgb(static_cast<size_t>(frameWidth) * frameHeight * 3);
   glPixelStorei(GL_PACK_ALIGNMENT, 1);
   glReadPixels(0, 0, frameWidth, frameHeight, GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
-
-  // EGL pbuffers are allowed to expose a front or back color buffer.  The
-  // game renders to the default buffer, while glReadPixels reads the current
-  // read buffer.  Prefer that normal path, but when it is completely black,
-  // also inspect GL_BACK and use it if it contains the rendered frame.
-  const auto energy = [](const std::vector<unsigned char>& pixels) {
-    size_t total = 0;
-    for (unsigned char value : pixels) total += value;
-    return total;
-  };
-  const size_t normalEnergy = energy(rgb);
-  if (normalEnergy == 0) {
-    GLint readBuffer = GL_FRONT;
-    glGetIntegerv(GL_READ_BUFFER, &readBuffer);
-    glReadBuffer(GL_BACK);
-    if (glGetError() == GL_NO_ERROR) {
-      std::vector<unsigned char> back(rgb.size());
-      glReadPixels(0, 0, frameWidth, frameHeight, GL_RGB, GL_UNSIGNED_BYTE, back.data());
-      if (glGetError() == GL_NO_ERROR && energy(back) > normalEnergy) rgb.swap(back);
-    }
-    glReadBuffer(readBuffer);
-    glGetError(); // discard an unsupported-buffer error on single-buffer pbuffers
-  }
   FILE* file = std::fopen(filename, "wb");
   if (!file) return 0;
   jpeg_compress_struct jpeg{};
@@ -117,20 +118,20 @@ extern "C" int saveEglFrame(const char* filename) {
 
 extern "C" void presentMonadiusFrame() {
   if (context == EGL_NO_CONTEXT) return;
-  // Main's original GLUT path presents every completed scene with
-  // glutSwapBuffers.  EGL pbuffers may likewise expose a back buffer, so make
-  // that transition before reading the presented color buffer into JPEG.
-  eglSwapBuffers(display, surface);
   const char* filename = std::getenv("MONADIUS_FRAME_FILE");
   if (filename && *filename) saveEglFrame(filename);
 }
 
 extern "C" void finishEglRenderer() {
   if (display != EGL_NO_DISPLAY) {
+    if (frameBuffer) glDeleteFramebuffers(1, &frameBuffer);
+    if (depthBuffer) glDeleteRenderbuffers(1, &depthBuffer);
+    if (frameTexture) glDeleteTextures(1, &frameTexture);
     eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     if (context != EGL_NO_CONTEXT) eglDestroyContext(display, context);
     if (surface != EGL_NO_SURFACE) eglDestroySurface(display, surface);
     eglTerminate(display);
   }
   display = EGL_NO_DISPLAY; surface = EGL_NO_SURFACE; context = EGL_NO_CONTEXT;
+  frameBuffer = frameTexture = depthBuffer = 0;
 }
