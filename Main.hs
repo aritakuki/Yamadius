@@ -60,7 +60,6 @@ foreign import ccall "_Z13procEffekseerv" c_procEffeksser :: IO ()
 foreign import ccall "_Z16restartEffekseeri" c_restartEffeksser :: CInt -> IO ()
 foreign import ccall "setEffekseerPlayerPosition" c_setEffeksserPlayerPosition :: CFloat -> CFloat -> IO ()
 foreign import ccall "initEglRenderer" c_initEglRenderer :: CInt -> CInt -> IO CInt
-foreign import ccall "beginEglFrame" c_beginEglFrame :: IO ()
 foreign import ccall "finishEglRenderer" c_finishEglRenderer :: IO ()
 foreign import ccall "presentMonadiusFrame" c_presentMonadiusFrame :: IO ()
 
@@ -227,8 +226,6 @@ initMatrixSize (Size width height) = do
 
 dispProc :: Maybe FilePath -> IORef [Key] -> IORef (IO Scene) -> IO ()
 dispProc externalInputFile keystate cp = do
-  headless <- isJust <$> lookupEnv "MONADIUS_EGL"
-  when headless c_beginEglFrame
   refreshExternalKeys externalInputFile keystate
   m <- readIORef cp
   Scene next <- m

@@ -1415,7 +1415,7 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   putDebugStrLn $ show $ length objects
   let playerX :+ playerY = position vicViper
   c_setEffeksserPlayerPosition (realToFrac playerX) (realToFrac playerY)
-  Size clientWidth clientHeight <- renderTargetSize
+  Size clientWidth clientHeight <- get windowSize
   let (stageX,stageY,stageWidth,stageHeight,hudHeight) = hudLayout clientWidth clientHeight
   -- Keep a 4:3 stage and add the HUD below it; both scale with the window.
   viewport $= (Position (fromIntegral stageX) (fromIntegral stageY),
@@ -1499,13 +1499,6 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   isGauge PowerUpGauge{} = True
   isGauge _              = False
 
-  renderTargetSize :: IO Size
-  renderTargetSize = do
-    headless <- lookupEnv "MONADIUS_EGL"
-    case headless of
-      Just _  -> return $ Size 1280 1040
-      Nothing -> get windowSize
-
   hudLayout :: GLsizei -> GLsizei -> (Int,Int,Int,Int,Int)
   hudLayout width height = (stageLeft, hudPixels,
                             stagePixels * 4 `div` 3, stagePixels, hudPixels)
@@ -1522,7 +1515,7 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   renderGameObject :: GameObject -> IO ()
   renderGameObject gauge@PowerUpGauge{} = preservingMatrix $ do
     let x:+y = position gauge
-    Size clientWidth clientHeight <- renderTargetSize
+    Size clientWidth clientHeight <- get windowSize
     let (_,_,_,_,currentHudHeight) = hudLayout clientWidth clientHeight
     blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
     depthFunc $= Just Always
