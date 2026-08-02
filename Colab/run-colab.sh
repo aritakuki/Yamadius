@@ -12,9 +12,10 @@ DISPLAY_NUMBER="${MONADIUS_FONT_DISPLAY:-:99}"
 FRAME_FILE="$RUNTIME_DIR/frame.jpg"
 INPUT_FILE="$RUNTIME_DIR/keys"
 VENDOR_FILE="$RUNTIME_DIR/nvidia-egl.json"
+BRIDGE_READY_FILE="$RUNTIME_DIR/bridge.ready"
 
 mkdir -p "$RUNTIME_DIR"
-rm -f "$FRAME_FILE" "$INPUT_FILE"
+rm -f "$FRAME_FILE" "$INPUT_FILE" "$BRIDGE_READY_FILE"
 
 cleanup() {
   for process_id in "${GAME_PID:-}" "${BRIDGE_PID:-}" "${XVFB_PID:-}"; do
@@ -43,8 +44,26 @@ kill -0 "$XVFB_PID"
 
 python3 "$ROOT_DIR/Colab/monadius_colab_bridge.py" \
   --port "$PORT" --frame-file "$FRAME_FILE" --input-file "$INPUT_FILE" \
-  --audio-file "$ROOT_DIR/BGM/bgm0.wav" >"$RUNTIME_DIR/bridge.log" 2>&1 &
+  --audio-file "$ROOT_DIR/BGM/bgm0.wav" --ready-file "$BRIDGE_READY_FILE" \
+  >"$RUNTIME_DIR/bridge.log" 2>&1 &
 BRIDGE_PID=$!
+
+# Do not start the game until the new bridge has bound the port.  In
+# particular, a previous bridge can leave the port in TIME_WAIT after a
+# Fresh Start; continuing here would otherwise produce a running game whose
+# new frames cannot reach the notebook iframe.
+for _ in $(seq 1 100); do
+  test -f "$BRIDGE_READY_FILE" && break
+  if ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+    cat "$RUNTIME_DIR/bridge.log" >&2 || true
+    exit 1
+  fi
+  sleep 0.1
+done
+if ! test -f "$BRIDGE_READY_FILE"; then
+  echo "Timed out waiting for the Colab bridge on port $PORT." >&2
+  exit 1
+fi
 
 cd "$ROOT_DIR"
 env \

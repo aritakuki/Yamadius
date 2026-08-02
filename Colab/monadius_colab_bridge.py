@@ -94,6 +94,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_error(404)
 
 
+class ReusableTCPServer(socketserver.TCPServer):
+    # Fresh Start can replace a bridge whose TCP connection has only just
+    # closed.  Without this, Linux may reject the replacement with EADDRINUSE
+    # while the old socket is in TIME_WAIT.
+    allow_reuse_address = True
+
+
 def write_atomically(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False) as stream:
@@ -108,12 +115,15 @@ def main() -> None:
     parser.add_argument("--frame-file", type=Path, required=True)
     parser.add_argument("--input-file", type=Path, required=True)
     parser.add_argument("--audio-file", type=Path, required=True)
+    parser.add_argument("--ready-file", type=Path)
     args = parser.parse_args()
     Handler.frame_file = args.frame_file
     Handler.input_file = args.input_file
     Handler.audio_file = args.audio_file
     write_atomically(args.input_file, "")
-    with socketserver.TCPServer(("127.0.0.1", args.port), Handler) as server:
+    with ReusableTCPServer(("127.0.0.1", args.port), Handler) as server:
+        if args.ready_file is not None:
+            write_atomically(args.ready_file, "ready\n")
         print(f"Monadius bridge listening on 127.0.0.1:{args.port}", flush=True)
         server.serve_forever()
 
