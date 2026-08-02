@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import socketserver
 import tempfile
+import time
 from urllib.parse import parse_qs, urlparse
 
 
@@ -25,7 +26,7 @@ PAGE = """<!doctype html>
 </style></head><body>
 <div id="help">Click the game, then use arrow keys, A (shot/missile), F (power-up), Space (start), G (self-destruct). <span id="state">keys: none</span> · <span id="engine">engine: waiting</span></div>
 <audio id="bgm" controls loop src="/bgm.wav"></audio>
-<img id="screen" tabindex="0" alt="Monadius is starting…" src="/frame.jpg">
+<img id="screen" tabindex="0" alt="Monadius is starting…" src="/stream.mjpg">
 <script>
 const screen = document.getElementById('screen');
 const state = document.getElementById('state');
@@ -38,6 +39,8 @@ const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'do
 function send() {
   const value = [...held].join(' ');
   state.textContent = 'keys: ' + (value || 'none');
+  fetch('/keys?value=' + encodeURIComponent(value), {cache:'no-store'})
+    .catch(() => { state.textContent = 'keys: bridge unavailable'; });
 }
 function token(e) {
   if (e.code === 'Space' || e.key === 'Spacebar') return 'space';
@@ -54,21 +57,9 @@ addEventListener('keyup', e => { const k = token(e); if (k) {
 }});
 addEventListener('blur', () => { held.clear(); send(); });
 screen.addEventListener('click', () => { screen.focus(); bgm.play().catch(() => {}); });
-// Wait for each proxied JPEG to finish before requesting the next one.
-// Replacing img.src every 50 ms cancels an in-flight Colab proxy response and
-// leaves the browser displaying the first successfully decoded title frame.
-let frameTimer = null;
-function scheduleFrame(delay) {
-  clearTimeout(frameTimer);
-  frameTimer = setTimeout(requestFrame, delay);
-}
-function requestFrame() {
-  const keys = [...held].join(' ');
-  screen.src = '/frame.jpg?t=' + Date.now() + '&keys=' + encodeURIComponent(keys);
-}
-screen.addEventListener('load', () => { scheduleFrame(50); });
-screen.addEventListener('error', () => { scheduleFrame(250); });
-scheduleFrame(50);
+// Resend held controls independently of the operating system's key-repeat
+// rate.  Frame delivery uses one continuous MJPEG response below.
+setInterval(() => { if (held.size) send(); }, 100);
 setInterval(() => {
   fetch('/status?t=' + Date.now(), {cache:'no-store'})
     .then(response => response.ok ? response.text() : Promise.reject())
@@ -112,6 +103,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(self.frame_file.read_bytes())
             return
+        if request.path == "/stream.mjpg":
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.end_headers()
+            self.stream_frames()
+            return
         if request.path == "/bgm.wav" and self.audio_file.is_file():
             self.send_response(200)
             self.send_header("Content-Type", "audio/wav")
@@ -127,6 +125,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(self.status_file.read_bytes())
             return
         self.send_error(404)
+
+    def stream_frames(self) -> None:
+        last_modified = -1
+        try:
+            while True:
+                try:
+                    modified = self.frame_file.stat().st_mtime_ns
+                except FileNotFoundError:
+                    time.sleep(0.005)
+                    continue
+                if modified == last_modified:
+                    time.sleep(0.005)
+                    continue
+                frame = self.frame_file.read_bytes()
+                last_modified = modified
+                self.wfile.write(b"--frame\r\n")
+                self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                self.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode("ascii"))
+                self.wfile.write(frame)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
 
 class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
