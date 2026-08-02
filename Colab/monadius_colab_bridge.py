@@ -23,12 +23,13 @@ PAGE = """<!doctype html>
   html, body { margin: 0; background: #080b14; color: #dce8ff; font-family: sans-serif; }
   #help { padding: 8px 12px; } #screen { display: block; width: 100%; max-width: 1280px; outline: none; }
 </style></head><body>
-<div id="help">Click the game, then use arrow keys, A (shot/missile), F (power-up), Space (start), G (self-destruct). <span id="state">keys: none</span></div>
+<div id="help">Click the game, then use arrow keys, A (shot/missile), F (power-up), Space (start), G (self-destruct). <span id="state">keys: none</span> · <span id="engine">engine: waiting</span></div>
 <audio id="bgm" controls loop src="/bgm.wav"></audio>
 <img id="screen" tabindex="0" alt="Monadius is starting…" src="/frame.jpg">
 <script>
 const screen = document.getElementById('screen');
 const state = document.getElementById('state');
+const engine = document.getElementById('engine');
 const bgm = document.getElementById('bgm');
 const held = new Set();
 const releases = new Map();
@@ -60,6 +61,12 @@ setInterval(() => {
   const keys = [...held].join(' ');
   screen.src = '/frame.jpg?t=' + Date.now() + '&keys=' + encodeURIComponent(keys);
 }, 1000 / 20);
+setInterval(() => {
+  fetch('/status?t=' + Date.now(), {cache:'no-store'})
+    .then(response => response.ok ? response.text() : Promise.reject())
+    .then(value => { engine.textContent = 'engine: ' + value; })
+    .catch(() => { engine.textContent = 'engine: unavailable'; });
+}, 250);
 </script></body></html>"""
 
 
@@ -67,6 +74,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     frame_file: Path
     input_file: Path
     audio_file: Path
+    status_file: Path
 
     def log_message(self, _format: str, *_args: object) -> None:
         pass
@@ -103,6 +111,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(self.audio_file.read_bytes())
             return
+        if request.path == "/status" and self.status_file.is_file():
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(self.status_file.read_bytes())
+            return
         self.send_error(404)
 
 
@@ -128,11 +143,13 @@ def main() -> None:
     parser.add_argument("--frame-file", type=Path, required=True)
     parser.add_argument("--input-file", type=Path, required=True)
     parser.add_argument("--audio-file", type=Path, required=True)
+    parser.add_argument("--status-file", type=Path, required=True)
     parser.add_argument("--ready-file", type=Path)
     args = parser.parse_args()
     Handler.frame_file = args.frame_file
     Handler.input_file = args.input_file
     Handler.audio_file = args.audio_file
+    Handler.status_file = args.status_file
     write_atomically(args.input_file, "")
     with ReusableTCPServer(("127.0.0.1", args.port), Handler) as server:
         if args.ready_file is not None:

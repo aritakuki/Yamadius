@@ -68,6 +68,14 @@ presentFrame = do
   eglMode <- isJust <$> lookupEnv "MONADIUS_EGL"
   if eglMode then c_presentMonadiusFrame else swapBuffers
 
+reportColabStatus :: String -> IO ()
+reportColabStatus value = do
+  statusFile <- lookupEnv "MONADIUS_STATUS_FILE"
+  case statusFile of
+    Nothing       -> return ()
+    Just filename -> writeFile filename value
+      `catch` (\(SomeException _) -> return ())
+
 data GlobalVariables = GlobalVariables{
   saveState :: (Int,Int) ,isCheat :: Bool, demoIndex :: Int,
   -- | 'recorderMode' means general gamemode that user wants,
@@ -264,6 +272,7 @@ openingProc shieldTextures ses sounds clock menuCursor vars ks = do
   if clock > demoStartTime then do demoStart vars else do
 
   keystate <- readIORef ks
+  reportColabStatus $ "scene=title clock=" ++ show clock ++ " keys=" ++ show keystate
   clear [ColorBuffer,DepthBuffer]
   matrixMode Graphics.UI.GLUT.$= Modelview 0
   loadIdentity
@@ -457,6 +466,7 @@ endingProc shieldTextures ses sounds vars ks ctr= do
 mainProc :: [GL.TextureObject] -> SEs -> Sounds -> GlobalVariables -> IORef Recorder -> IORef [Key] -> IO Scene
 mainProc shieldTextures ses sounds vars gs ks = do
   keystate <- readIORef ks
+  reportColabStatus $ "scene=game keys=" ++ show keystate
   beforegamestate <- readIORef gs
   playSe sounds ses keystate beforegamestate
   modifyIORef gs (update keystate)

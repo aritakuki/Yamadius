@@ -11,11 +11,12 @@ PORT="${MONADIUS_PORT:-8765}"
 DISPLAY_NUMBER="${MONADIUS_FONT_DISPLAY:-:99}"
 FRAME_FILE="$RUNTIME_DIR/frame.jpg"
 INPUT_FILE="$RUNTIME_DIR/keys"
+STATUS_FILE="$RUNTIME_DIR/game-status"
 VENDOR_FILE="$RUNTIME_DIR/nvidia-egl.json"
 BRIDGE_READY_FILE="$RUNTIME_DIR/bridge.ready"
 
 mkdir -p "$RUNTIME_DIR"
-rm -f "$FRAME_FILE" "$INPUT_FILE" "$BRIDGE_READY_FILE"
+rm -f "$FRAME_FILE" "$INPUT_FILE" "$STATUS_FILE" "$BRIDGE_READY_FILE"
 
 cleanup() {
   for process_id in "${GAME_PID:-}" "${BRIDGE_PID:-}" "${XVFB_PID:-}"; do
@@ -44,7 +45,8 @@ kill -0 "$XVFB_PID"
 
 python3 "$ROOT_DIR/Colab/monadius_colab_bridge.py" \
   --port "$PORT" --frame-file "$FRAME_FILE" --input-file "$INPUT_FILE" \
-  --audio-file "$ROOT_DIR/BGM/bgm0.wav" --ready-file "$BRIDGE_READY_FILE" \
+  --audio-file "$ROOT_DIR/BGM/bgm0.wav" --status-file "$STATUS_FILE" \
+  --ready-file "$BRIDGE_READY_FILE" \
   >"$RUNTIME_DIR/bridge.log" 2>&1 &
 BRIDGE_PID=$!
 
@@ -73,6 +75,7 @@ env \
   MONADIUS_EGL=1 \
   MONADIUS_FRAME_FILE="$FRAME_FILE" \
   MONADIUS_INPUT_FILE="$INPUT_FILE" \
+  MONADIUS_STATUS_FILE="$STATUS_FILE" \
   ALSOFT_DRIVERS=null \
   ./Main >"$RUNTIME_DIR/game.log" 2>&1 &
 GAME_PID=$!
