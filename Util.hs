@@ -26,16 +26,21 @@ module Util (
   ) where
 
 import           Control.Concurrent
-import           Control.Monad             (unless, when)
+import           Control.Monad             (forM_, forever, unless, when)
 import           Control.Monad.Fix         (fix)
 import           Data.Array                (Array, Ix, (!), (//))
 import           Data.Complex
 import           Data.List                 (intersperse)
 import           Data.Maybe
+import           Data.IORef                (IORef, newIORef, readIORef, writeIORef)
 import           Graphics.Rendering.OpenGL
 import           Sound.ALUT
+import           Foreign.C.Types           (CFloat)
+import           System.Environment        (lookupEnv)
 import           System.Exit               (exitFailure)
-import           System.IO                 (hPutStrLn, stderr)
+import           System.IO                 (IOMode (AppendMode), hFlush, hPutStr,
+                                            hPutStrLn, stderr, withFile)
+import           System.IO.Unsafe          (unsafePerformIO)
 
 -- | Switch this to True to get debug outputs. Be careful: you get a crash under
 -- Microsoft Windows, because the console is not available.
@@ -111,35 +116,43 @@ square :: (Num a) => a -> a
 square a = a * a
 
 
-data Sounds = Sounds { bgm0 :: Source
-                     , bgm1 :: Source
-                     , bgm2 :: Source
-                     , bgm3 :: Source
-                     , bgm4 :: Source }
+-- Keep the OpenAL source together with the repository-relative WAV path.
+-- Native builds continue to use the source directly.  Colab additionally
+-- writes the path to a small event stream so the browser can reproduce the
+-- same BGM/SE decisions made by the game engine.
+data SoundAsset = SoundAsset { soundSource :: Source
+                             , soundPath   :: FilePath
+                             , soundGain   :: IORef CFloat }
 
-data SEs = SEs { start           :: Source
-                  , shot         :: Source
-                  , laserSe      :: Source
-                  , crash        :: Source
-                  , hatchCrash   :: Source
-                  , damageHatch  :: Source
-                  , damageShield :: Source
-                  , getCapsule   :: Source
-                  , speedUp      :: Source
-                  , missile      :: Source
-                  , double       :: Source
-                  , laser        :: Source
-                  , option       :: Source
-                  , shieldVoice  :: Source
-                  , destroy      :: Source
-                  , launcher3    :: Source
-                  , launchers    :: Source
-                  , eftsuki      :: Source
-                  , efatchi      :: Source
-                  , efwarero     :: Source
-                  , eficchimae   :: Source
-                  , efkaze       :: Source
-                  , efopen       :: Source }
+data Sounds = Sounds { bgm0 :: SoundAsset
+                     , bgm1 :: SoundAsset
+                     , bgm2 :: SoundAsset
+                     , bgm3 :: SoundAsset
+                     , bgm4 :: SoundAsset }
+
+data SEs = SEs { start           :: SoundAsset
+                  , shot         :: SoundAsset
+                  , laserSe      :: SoundAsset
+                  , crash        :: SoundAsset
+                  , hatchCrash   :: SoundAsset
+                  , damageHatch  :: SoundAsset
+                  , damageShield :: SoundAsset
+                  , getCapsule   :: SoundAsset
+                  , speedUp      :: SoundAsset
+                  , missile      :: SoundAsset
+                  , double       :: SoundAsset
+                  , laser        :: SoundAsset
+                  , option       :: SoundAsset
+                  , shieldVoice  :: SoundAsset
+                  , destroy      :: SoundAsset
+                  , launcher3    :: SoundAsset
+                  , launchers    :: SoundAsset
+                  , eftsuki      :: SoundAsset
+                  , efatchi      :: SoundAsset
+                  , efwarero     :: SoundAsset
+                  , eficchimae   :: SoundAsset
+                  , efkaze       :: SoundAsset
+                  , efopen       :: SoundAsset }
 
 loadSounds :: IO Sounds
 loadSounds = do
@@ -148,81 +161,123 @@ loadSounds = do
     bgm2Source <- loadSound "BGM/bgm2.wav"
     bgm3Source <- loadSound "BGM/bgm3.wav"
     bgm4Source <- loadSound "BGM/bgm4.wav"
-    sourceGain bgm0Source Sound.ALUT.$= 1.0
-    sourceGain bgm1Source Sound.ALUT.$= 1.0
-    sourceGain bgm2Source Sound.ALUT.$= 1.0
-    sourceGain bgm3Source Sound.ALUT.$= 1.0
-    sourceGain bgm4Source Sound.ALUT.$= 1.0
+    setSoundGain bgm0Source 1.0
+    setSoundGain bgm1Source 1.0
+    setSoundGain bgm2Source 1.0
+    setSoundGain bgm3Source 1.0
+    setSoundGain bgm4Source 1.0
     return $ Sounds bgm0Source bgm1Source bgm2Source bgm3Source bgm4Source
 
-loadSound :: FilePath -> IO Source
+loadSound :: FilePath -> IO SoundAsset
 loadSound path = do
     buf <- createBuffer (File path)
     source <- genObjectName
+    gain <- newIORef 1.0
     buffer source Sound.ALUT.$= Just buf
-    return source
+    return $ SoundAsset source path gain
 
-backgroundMusic :: Source -> IO ()
-backgroundMusic source = do
-        loopingMode source Sound.ALUT.$= Looping
-        play [source]
+setSoundGain :: SoundAsset -> CFloat -> IO ()
+setSoundGain asset gain = do
+    sourceGain (soundSource asset) Sound.ALUT.$= gain
+    writeIORef (soundGain asset) gain
+
+{-# NOINLINE audioEventWriter #-}
+audioEventWriter :: MVar (Maybe (FilePath, Chan String))
+audioEventWriter = unsafePerformIO $ newMVar Nothing
+
+audioEventChannel :: FilePath -> IO (Chan String)
+audioEventChannel filename = modifyMVar audioEventWriter $ \current ->
+    case current of
+      Just (activeFilename, channel) | activeFilename == filename ->
+        return (current, channel)
+      _ -> do
+        channel <- newChan
+        _ <- forkIO $ withFile filename AppendMode $ \handle -> forever $ do
+          event <- readChan channel
+          hPutStr handle event
+          hFlush handle
+        return (Just (filename, channel), channel)
+
+emitAudioEvent :: String -> Maybe SoundAsset -> IO ()
+emitAudioEvent action asset = do
+    eventFile <- lookupEnv "MONADIUS_AUDIO_EVENT_FILE"
+    forM_ eventFile $ \filename -> do
+        channel <- audioEventChannel filename
+        fields <- case asset of
+          Nothing -> return ""
+          Just sound -> do
+            gain <- readIORef $ soundGain sound
+            return $ "\t" ++ soundPath sound ++ "\t" ++ show gain
+        writeChan channel $ action ++ fields ++ "\n"
+
+backgroundMusic :: SoundAsset -> IO ()
+backgroundMusic asset = do
+        loopingMode (soundSource asset) Sound.ALUT.$= Looping
+        play [soundSource asset]
+        emitAudioEvent "bgm" (Just asset)
 
 stopMusic :: Sounds -> IO ()
 stopMusic (Sounds bgm0Source bgm1Source bgm2Source bgm3Source bgm4Source) = do
-        stop [bgm0Source]
-        stop [bgm1Source]
-        stop [bgm2Source]
-        stop [bgm3Source]
-        stop [bgm4Source]
+        stop $ map soundSource [bgm0Source, bgm1Source, bgm2Source, bgm3Source, bgm4Source]
+        emitAudioEvent "stop-bgm" Nothing
 
-playContinuousSound :: Source -> IO ()
-playContinuousSound source = do
-        state <- Sound.ALUT.get (sourceState source)
-        unless (state == Playing) $ play [source]
+playContinuousSound :: SoundAsset -> IO ()
+playContinuousSound asset = do
+        state <- Sound.ALUT.get (sourceState $ soundSource asset)
+        unless (state == Playing) $ do
+            play [soundSource asset]
+            emitAudioEvent "play" (Just asset)
 
-playSound :: Source -> IO ()
-playSound source = do
-    play [source]
+playSound :: SoundAsset -> IO ()
+playSound asset = do
+    previousState <- Sound.ALUT.get (sourceState $ soundSource asset)
+    play [soundSource asset]
+    -- OpenAL ignores play on a Source that is already Playing.  Mirror that
+    -- behaviour in the browser event stream; several game objects call this
+    -- once per frame while the same short effect is still active.
+    unless (previousState == Playing) $ emitAudioEvent "play" (Just asset)
     -- Normally nothing should go wrong above, but one never knows...
     errs <- Sound.ALUT.get alErrors
     unless (null errs) $ do
         hPutStrLn stderr (concat (intersperse "," [ d | ALError _ d <- errs ]))
     return ()
 
-stopSound :: Source -> IO ()
-stopSound source = stop [source]
+stopSound :: SoundAsset -> IO ()
+stopSound asset = do
+    stop [soundSource asset]
+    emitAudioEvent "stop" (Just asset)
 
 loadSEs :: IO SEs
 loadSEs = do
     startSource <- loadSound "SE/start.wav"
     shotSource <- loadSound "SE/shot.wav"
-    sourceGain shotSource Sound.ALUT.$= 0.1
+    setSoundGain shotSource 0.1
     laserSource <- loadSound "SE/laser.wav"
-    sourceGain laserSource Sound.ALUT.$= 0.3
+    setSoundGain laserSource 0.3
     crashSource <- loadSound "SE/crash.wav"
-    sourceGain crashSource Sound.ALUT.$= 0.5
+    setSoundGain crashSource 0.5
     hatchCrashSource <- loadSound "SE/hatchCrash.wav"
-    sourceGain hatchCrashSource Sound.ALUT.$= 1.0
+    setSoundGain hatchCrashSource 1.0
     damageHatchSource <- loadSound "SE/damageHatch.wav"
-    sourceGain damageHatchSource Sound.ALUT.$= 1.0
+    setSoundGain damageHatchSource 1.0
     damageShieldSource <- loadSound "SE/damageShield.wav"
-    sourceGain damageShieldSource Sound.ALUT.$= 1.0
+    setSoundGain damageShieldSource 1.0
     getCapsuleSource <- loadSound "SE/getCapsule.wav"
 --    sourceGain getCapsuleSource Sound.ALUT.$= 0.1
     speedUpSource <- loadSound "SE/speedupVoice.wav"
-    sourceGain speedUpSource Sound.ALUT.$= 1.0
+    setSoundGain speedUpSource 1.0
     missileSource <- loadSound "SE/missileVoice.wav"
-    sourceGain missileSource Sound.ALUT.$= 1.0
+    setSoundGain missileSource 1.0
     doubleSource <- loadSound "SE/doubleVoice.wav"
-    sourceGain doubleSource Sound.ALUT.$= 1.0
+    setSoundGain doubleSource 1.0
     laserVoiceSource <- loadSound "SE/laserVoice.wav"
-    sourceGain laserVoiceSource Sound.ALUT.$= 1.0
+    setSoundGain laserVoiceSource 1.0
     optionSource <- loadSound "SE/optionVoice.wav"
-    sourceGain optionSource Sound.ALUT.$= 1.0
+    setSoundGain optionSource 1.0
     shieldSource <- loadSound "SE/shieldVoice.wav"
-    sourceGain shieldSource Sound.ALUT.$= 1.0
+    setSoundGain shieldSource 1.0
     destroySource <- loadSound "SE/destroy.wav"
-    sourceGain destroySource Sound.ALUT.$= 1.0
+    setSoundGain destroySource 1.0
     launcher3Source <- loadSound "SE/launcher3.wav"
     launchersSource <- loadSound "SE/launchers.wav"
     eftsukiSource <- loadSound "SE/EfTsuki.wav"

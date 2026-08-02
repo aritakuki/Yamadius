@@ -272,7 +272,8 @@ openingProc shieldTextures ses sounds clock menuCursor vars ks = do
   if clock > demoStartTime then do demoStart vars else do
 
   keystate <- readIORef ks
-  reportColabStatus $ "scene=title clock=" ++ show clock ++ " keys=" ++ show keystate
+  when (clock `mod` 10 == 0) $
+    reportColabStatus $ "scene=title clock=" ++ show clock ++ " keys=" ++ show keystate
   clear [ColorBuffer,DepthBuffer]
   matrixMode Graphics.UI.GLUT.$= Modelview 0
   loadIdentity
@@ -466,8 +467,10 @@ endingProc shieldTextures ses sounds vars ks ctr= do
 mainProc :: [GL.TextureObject] -> SEs -> Sounds -> GlobalVariables -> IORef Recorder -> IORef [Key] -> IO Scene
 mainProc shieldTextures ses sounds vars gs ks = do
   keystate <- readIORef ks
-  reportColabStatus $ "scene=game keys=" ++ show keystate
   beforegamestate <- readIORef gs
+  let engineClock = gameClock $ getVariables $ gameBody beforegamestate
+  when (engineClock `mod` 10 == 0) $
+    reportColabStatus $ "scene=game clock=" ++ show engineClock ++ " keys=" ++ show keystate
   playSe sounds ses keystate beforegamestate
   modifyIORef gs (update keystate)
   gamestate <- readIORef gs
