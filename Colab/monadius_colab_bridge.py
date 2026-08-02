@@ -15,7 +15,9 @@ import os
 from pathlib import Path
 import re
 import socketserver
+import struct
 import tempfile
+import threading
 import time
 from urllib.parse import parse_qs, urlparse
 
@@ -28,42 +30,107 @@ PAGE = """<!doctype html>
   #screen { display: block; width: auto; height: auto; max-width: 100%;
             max-height: calc(100vh - 92px); object-fit: contain; outline: none; }
 </style></head><body>
-<div id="help">Click the game, then use arrow keys, A (shot/missile), F (power-up), Space (start), G (self-destruct). <span id="state">keys: none</span> · <span id="engine">engine: waiting</span> · <span id="audio-state">audio: click game to enable</span></div>
+<div id="help">Click the game, then use arrow keys, A (shot/missile), F (power-up), Space (start), G (self-destruct). <span id="state">keys: none</span> · <span id="engine">engine: waiting</span> · <span id="video-state">video: waiting</span> · <span id="audio-state">audio: click game to enable</span></div>
 <audio id="bgm" controls loop></audio>
-<img id="screen" tabindex="0" alt="Monadius is starting…" src="/stream.mjpg">
+<canvas id="screen" tabindex="0" width="1280" height="1040">Monadius is starting…</canvas>
 <script>
 const screen = document.getElementById('screen');
+const frameContext = screen.getContext('2d', {alpha:false});
+frameContext.imageSmoothingEnabled = false;
 const state = document.getElementById('state');
 const engine = document.getElementById('engine');
+const videoState = document.getElementById('video-state');
 const bgm = document.getElementById('bgm');
 const audioState = document.getElementById('audio-state');
 const held = new Set();
 const releases = new Map();
+const pressedAt = new Map();
 const activeSounds = new Map();
+const movementTokens = new Set(['left', 'right', 'up', 'down']);
+const inputGeneration = Date.now();
+let inputSequence = 0;
 let audioOffset = -1;
 let audioUnlocked = false;
 const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
                ' ':'space', a:'a', A:'a', f:'f', F:'f', g:'g', G:'g'};
 function send() {
   const value = [...held].join(' ');
+  const sequence = ++inputSequence;
   state.textContent = 'keys: ' + (value || 'none');
-  fetch('/keys?value=' + encodeURIComponent(value), {cache:'no-store'})
-    .catch(() => { state.textContent = 'keys: bridge unavailable'; });
+  const query = new URLSearchParams({generation:String(inputGeneration),
+                                     sequence:String(sequence), value});
+  fetch('/keys?' + query.toString(), {cache:'no-store'})
+    .catch(() => {
+      if (sequence === inputSequence) {
+        state.textContent = 'keys: bridge unavailable';
+        setTimeout(send, 50);
+      }
+    });
 }
 function token(e) {
   if (e.code === 'Space' || e.key === 'Spacebar') return 'space';
   return names[e.key] || (/^[0-9]$/.test(e.key) ? e.key : null);
 }
-// Main polls a file once per frame, unlike GLUT's native key-down callback.
-// Retain a released key briefly so a normal tap (especially Space on title)
-// cannot occur entirely between two polls.  Held movement keys remain held.
 addEventListener('keydown', e => { const k = token(e); if (k) {
-  clearTimeout(releases.get(k)); held.add(k); send(); e.preventDefault();
+  clearTimeout(releases.get(k));
+  if (!held.has(k)) {
+    held.add(k); pressedAt.set(k, performance.now()); send();
+  }
+  e.preventDefault();
 }});
 addEventListener('keyup', e => { const k = token(e); if (k) {
-  releases.set(k, setTimeout(() => { held.delete(k); send(); }, 120)); e.preventDefault();
+  clearTimeout(releases.get(k));
+  const heldFor = performance.now() - (pressedAt.get(k) || 0);
+  // Movement must stop at keyup.  Only very short action taps are extended
+  // enough for Main's next 16 ms input poll to observe them.
+  const delay = movementTokens.has(k) ? 0 : Math.max(0, 80 - heldFor);
+  const release = () => { held.delete(k); pressedAt.delete(k); send(); };
+  if (delay === 0) release(); else releases.set(k, setTimeout(release, delay));
+  e.preventDefault();
 }});
-addEventListener('blur', () => { held.clear(); send(); });
+addEventListener('blur', () => {
+  for (const timeout of releases.values()) clearTimeout(timeout);
+  releases.clear(); pressedAt.clear(); held.clear(); send();
+});
+
+let displayedFrame = '-1';
+let videoFrames = 0;
+let videoWindowStarted = performance.now();
+const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+async function displayLatestFrames() {
+  while (true) {
+    const requestStarted = performance.now();
+    try {
+      const response = await fetch('/latest-frame?after=' + displayedFrame,
+                                   {cache:'no-store'});
+      if (response.status === 204) continue;
+      if (!response.ok) throw new Error('frame request failed');
+      const encoded = await response.arrayBuffer();
+      if (encoded.byteLength <= 8) throw new Error('short frame response');
+      displayedFrame = new DataView(encoded, 0, 8).getBigUint64(0, false).toString();
+      const bitmap = await createImageBitmap(
+          new Blob([encoded.slice(8)], {type:'image/jpeg'}));
+      if (screen.width !== bitmap.width || screen.height !== bitmap.height) {
+        screen.width = bitmap.width; screen.height = bitmap.height;
+        frameContext.imageSmoothingEnabled = false;
+      }
+      frameContext.drawImage(bitmap, 0, 0);
+      bitmap.close();
+
+      videoFrames += 1;
+      const now = performance.now();
+      if (now - videoWindowStarted >= 1000) {
+        const fps = (videoFrames * 1000 / (now - videoWindowStarted)).toFixed(1);
+        videoState.textContent = 'video: ' + fps + ' fps · ' +
+            Math.round(now - requestStarted) + ' ms/frame';
+        videoFrames = 0; videoWindowStarted = now;
+      }
+    } catch (_) {
+      videoState.textContent = 'video: reconnecting';
+      await wait(100);
+    }
+  }
+}
 function audioUrl(path) {
   return '/audio?path=' + encodeURIComponent(path);
 }
@@ -99,6 +166,7 @@ function applyAudioEvent(event) {
   }
 }
 async function pollAudioEvents() {
+  let retryDelay = 0;
   try {
     const response = await fetch('/audio-events?offset=' + audioOffset, {cache:'no-store'});
     if (!response.ok) throw new Error('audio event request failed');
@@ -107,33 +175,40 @@ async function pollAudioEvents() {
     for (const event of update.events) applyAudioEvent(event);
   } catch (_) {
     audioState.textContent = 'audio: bridge unavailable';
+    retryDelay = 250;
   }
-  setTimeout(pollAudioEvents, 50);
+  setTimeout(pollAudioEvents, retryDelay);
 }
 screen.addEventListener('click', () => {
   screen.focus();
   audioUnlocked = true;
   if (bgm.src) bgm.play().catch(() => {});
 });
-// Resend held controls independently of the operating system's key-repeat
-// rate.  Frame delivery uses one continuous MJPEG response below.
-setInterval(() => { if (held.size) send(); }, 100);
+// A retry protects a held direction from a transient proxy request failure;
+// ordered sequence numbers prevent an older retry from undoing a newer keyup.
+setInterval(() => { if (held.size) send(); }, 250);
 setInterval(() => {
   fetch('/status?t=' + Date.now(), {cache:'no-store'})
     .then(response => response.ok ? response.text() : Promise.reject())
     .then(value => { engine.textContent = 'engine: ' + value; })
     .catch(() => { engine.textContent = 'engine: unavailable'; });
-}, 250);
+}, 500);
+send();
+displayLatestFrames();
 pollAudioEvents();
 </script></body></html>"""
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     frame_file: Path
     input_file: Path
     asset_root: Path
     audio_event_file: Path
     status_file: Path
+    input_lock = threading.Lock()
+    input_generation = -1
+    input_sequence = -1
 
     def log_message(self, _format: str, *_args: object) -> None:
         pass
@@ -141,34 +216,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         request = urlparse(self.path)
         if request.path == "/":
+            payload = PAGE.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
-            self.wfile.write(PAGE.encode("utf-8"))
+            self.wfile.write(payload)
             return
         if request.path == "/keys":
-            value = parse_qs(request.query).get("value", [""])[0]
-            write_atomically(self.input_file, value)
-            self.send_response(204)
-            self.end_headers()
+            self.accept_keys(request)
             return
         if request.path == "/frame.jpg" and self.frame_file.is_file():
-            query = parse_qs(request.query, keep_blank_values=True)
-            if "keys" in query:
-                write_atomically(self.input_file, query["keys"][0])
+            payload = self.frame_file.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "image/jpeg")
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
-            self.wfile.write(self.frame_file.read_bytes())
+            self.wfile.write(payload)
             return
-        if request.path == "/stream.mjpg":
-            self.send_response(200)
-            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-            self.end_headers()
-            self.stream_frames()
+        if request.path == "/latest-frame":
+            self.serve_latest_frame(request)
             return
         if request.path == "/audio":
             self.serve_audio(request, head_only=False)
@@ -177,13 +246,72 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.serve_audio_events(request)
             return
         if request.path == "/status" and self.status_file.is_file():
+            payload = self.status_file.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
-            self.wfile.write(self.status_file.read_bytes())
+            self.wfile.write(payload)
             return
         self.send_error(404)
+
+    def accept_keys(self, request: object) -> None:
+        query = parse_qs(request.query, keep_blank_values=True)
+        try:
+            generation = int(query.get("generation", ["-1"])[0])
+            sequence = int(query.get("sequence", ["-1"])[0])
+        except ValueError:
+            self.send_error(400, "Invalid input sequence")
+            return
+        value = query.get("value", [""])[0]
+        with self.input_lock:
+            is_newer = generation > self.input_generation or (
+                generation == self.input_generation and sequence > self.input_sequence)
+            if is_newer:
+                write_atomically(self.input_file, value)
+                type(self).input_generation = generation
+                type(self).input_sequence = sequence
+        self.send_response(204)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def serve_latest_frame(self, request: object) -> None:
+        try:
+            after = int(parse_qs(request.query).get("after", ["-1"])[0])
+        except ValueError:
+            after = -1
+        deadline = time.monotonic() + 10.0
+        while True:
+            try:
+                if self.frame_file.stat().st_mtime_ns > after:
+                    with self.frame_file.open("rb") as stream:
+                        modified = os.fstat(stream.fileno()).st_mtime_ns
+                        if modified > after:
+                            frame = stream.read()
+                            break
+            except FileNotFoundError:
+                pass
+            if time.monotonic() >= deadline:
+                self.send_response(204)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            time.sleep(0.004)
+
+        payload = struct.pack(">Q", modified) + frame
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-monadius-frame")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("X-Monadius-Frame", str(modified))
+        self.end_headers()
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def do_HEAD(self) -> None:
         request = urlparse(self.path)
@@ -198,23 +326,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             requested_offset = -1
 
-        complete_data = b""
-        next_offset = 0
-        if self.audio_event_file.is_file():
-            size = self.audio_event_file.stat().st_size
-            snapshot = requested_offset < 0 or requested_offset > size
-            start = 0 if snapshot else requested_offset
-            with self.audio_event_file.open("rb") as stream:
-                stream.seek(start)
-                data = stream.read()
-            last_newline = data.rfind(b"\n")
-            if last_newline >= 0:
-                complete_data = data[:last_newline + 1]
-                next_offset = start + last_newline + 1
-            else:
-                next_offset = start
-        else:
-            snapshot = True
+        snapshot = requested_offset < 0
+        deadline = time.monotonic() + 2.0
+        while True:
+            complete_data = b""
+            next_offset = 0
+            if self.audio_event_file.is_file():
+                size = self.audio_event_file.stat().st_size
+                snapshot = snapshot or requested_offset > size
+                start = 0 if snapshot else requested_offset
+                with self.audio_event_file.open("rb") as stream:
+                    stream.seek(start)
+                    data = stream.read()
+                last_newline = data.rfind(b"\n")
+                if last_newline >= 0:
+                    complete_data = data[:last_newline + 1]
+                    next_offset = start + last_newline + 1
+                else:
+                    next_offset = start
+            if snapshot or complete_data or time.monotonic() >= deadline:
+                break
+            time.sleep(0.01)
 
         events = parse_audio_events(complete_data)
         if snapshot:
@@ -232,7 +364,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def serve_audio(self, request: object, head_only: bool) -> None:
         relative = parse_qs(request.query).get("path", [""])[0]
@@ -264,6 +399,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if start > end or start >= size:
                 self.send_response(416)
                 self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
             status = 206
@@ -291,30 +427,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     remaining -= len(chunk)
         except (BrokenPipeError, ConnectionResetError):
             return
-
-    def stream_frames(self) -> None:
-        last_modified = -1
-        try:
-            while True:
-                try:
-                    modified = self.frame_file.stat().st_mtime_ns
-                except FileNotFoundError:
-                    time.sleep(0.005)
-                    continue
-                if modified == last_modified:
-                    time.sleep(0.005)
-                    continue
-                frame = self.frame_file.read_bytes()
-                last_modified = modified
-                self.wfile.write(b"--frame\r\n")
-                self.wfile.write(b"Content-Type: image/jpeg\r\n")
-                self.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode("ascii"))
-                self.wfile.write(frame)
-                self.wfile.write(b"\r\n")
-                self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            return
-
 
 class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     # Fresh Start can replace a bridge whose TCP connection has only just
