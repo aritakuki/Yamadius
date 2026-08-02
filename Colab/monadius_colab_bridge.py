@@ -37,9 +37,13 @@ const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'do
 function send() {
   const value = [...held].join(' ');
   state.textContent = 'keys: ' + (value || 'none');
-  fetch('/keys?value=' + encodeURIComponent(value), {cache:'no-store'});
+  fetch('/keys?value=' + encodeURIComponent(value), {cache:'no-store'})
+    .catch(() => { state.textContent = 'keys: bridge unavailable'; });
 }
-function token(e) { return names[e.key] || (/^[0-9]$/.test(e.key) ? e.key : null); }
+function token(e) {
+  if (e.code === 'Space' || e.key === 'Spacebar') return 'space';
+  return names[e.key] || (/^[0-9]$/.test(e.key) ? e.key : null);
+}
 // Main polls a file once per frame, unlike GLUT's native key-down callback.
 // Retain a released key briefly so a normal tap (especially Space on title)
 // cannot occur entirely between two polls.  Held movement keys remain held.
@@ -51,6 +55,9 @@ addEventListener('keyup', e => { const k = token(e); if (k) {
 }});
 addEventListener('blur', () => { held.clear(); send(); });
 screen.addEventListener('click', () => { screen.focus(); bgm.play().catch(() => {}); });
+// Do not depend on the browser's key-repeat rate.  Colab's iframe proxy also
+// transfers JPEG frames, so resend held controls while the key is down.
+setInterval(() => { if (held.size) send(); }, 100);
 setInterval(() => { screen.src = '/frame.jpg?t=' + Date.now(); }, 1000 / 20);
 </script></body></html>"""
 
@@ -94,11 +101,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_error(404)
 
 
-class ReusableTCPServer(socketserver.TCPServer):
+class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     # Fresh Start can replace a bridge whose TCP connection has only just
     # closed.  Without this, Linux may reject the replacement with EADDRINUSE
     # while the old socket is in TIME_WAIT.
     allow_reuse_address = True
+    daemon_threads = True
 
 
 def write_atomically(path: Path, content: str) -> None:
