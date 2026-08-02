@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 #include <jpeglib.h>
@@ -91,7 +92,12 @@ extern "C" int saveEglFrame(const char* filename) {
     glReadBuffer(readBuffer);
     glGetError(); // discard an unsupported-buffer error on single-buffer pbuffers
   }
-  FILE* file = std::fopen(filename, "wb");
+  // The HTTP bridge reads the previous frame while this thread encodes the
+  // next one.  Publish only a complete JPEG: overwriting frame.jpg in place
+  // lets the browser receive a truncated image and retain its last decoded
+  // frame (typically the title screen).
+  const std::string temporaryFilename = std::string(filename) + ".tmp";
+  FILE* file = std::fopen(temporaryFilename.c_str(), "wb");
   if (!file) return 0;
   jpeg_compress_struct jpeg{};
   jpeg_error_mgr errors{};
@@ -112,6 +118,10 @@ extern "C" int saveEglFrame(const char* filename) {
   jpeg_finish_compress(&jpeg);
   jpeg_destroy_compress(&jpeg);
   std::fclose(file);
+  if (std::rename(temporaryFilename.c_str(), filename) != 0) {
+    std::remove(temporaryFilename.c_str());
+    return 0;
+  }
   return 1;
 }
 
