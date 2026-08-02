@@ -54,13 +54,21 @@ addEventListener('keyup', e => { const k = token(e); if (k) {
 }});
 addEventListener('blur', () => { held.clear(); send(); });
 screen.addEventListener('click', () => { screen.focus(); bgm.play().catch(() => {}); });
-// Colab already proxies every frame request successfully.  Carry the held
-// keys on that same request instead of relying on a second fetch channel,
-// which can be dropped by the notebook iframe proxy.
-setInterval(() => {
+// Wait for each proxied JPEG to finish before requesting the next one.
+// Replacing img.src every 50 ms cancels an in-flight Colab proxy response and
+// leaves the browser displaying the first successfully decoded title frame.
+let frameTimer = null;
+function scheduleFrame(delay) {
+  clearTimeout(frameTimer);
+  frameTimer = setTimeout(requestFrame, delay);
+}
+function requestFrame() {
   const keys = [...held].join(' ');
   screen.src = '/frame.jpg?t=' + Date.now() + '&keys=' + encodeURIComponent(keys);
-}, 1000 / 20);
+}
+screen.addEventListener('load', () => { scheduleFrame(50); });
+screen.addEventListener('error', () => { scheduleFrame(250); });
+scheduleFrame(50);
 setInterval(() => {
   fetch('/status?t=' + Date.now(), {cache:'no-store'})
     .then(response => response.ok ? response.text() : Promise.reject())
