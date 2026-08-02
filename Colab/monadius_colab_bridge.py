@@ -15,7 +15,6 @@ import os
 from pathlib import Path
 import re
 import socketserver
-import struct
 import tempfile
 import threading
 import time
@@ -93,23 +92,89 @@ addEventListener('blur', () => {
   releases.clear(); pressedAt.clear(); held.clear(); send();
 });
 
-let displayedFrame = '-1';
-let videoFrames = 0;
+let pendingFrame = null;
+let frameWaiter = null;
+let displayedFrames = 0;
+let droppedFrames = 0;
 let videoWindowStarted = performance.now();
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+const headerBreak = new Uint8Array([13, 10, 13, 10]);
+const headerDecoder = new TextDecoder('ascii');
+function findBytes(haystack, needle) {
+  outer: for (let i = 0; i <= haystack.length - needle.length; ++i) {
+    for (let j = 0; j < needle.length; ++j) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+function appendBytes(first, second) {
+  if (first.length === 0) return second;
+  const joined = new Uint8Array(first.length + second.length);
+  joined.set(first); joined.set(second, first.length);
+  return joined;
+}
+function queueLatestFrame(sequence, jpeg) {
+  if (pendingFrame !== null) droppedFrames += 1;
+  pendingFrame = {sequence, jpeg};
+  if (frameWaiter !== null) {
+    const wake = frameWaiter;
+    frameWaiter = null;
+    wake();
+  }
+}
+async function takeLatestFrame() {
+  while (pendingFrame === null) {
+    await new Promise(resolve => { frameWaiter = resolve; });
+  }
+  const frame = pendingFrame;
+  pendingFrame = null;
+  return frame;
+}
+async function receiveFrameStream() {
+  while (true) {
+    try {
+      const response = await fetch('/frame-stream?t=' + Date.now(), {cache:'no-store'});
+      if (!response.ok || response.body === null) throw new Error('frame stream failed');
+      const reader = response.body.getReader();
+      let buffered = new Uint8Array(0);
+      while (true) {
+        const update = await reader.read();
+        if (update.done) throw new Error('frame stream ended');
+        buffered = appendBytes(buffered, update.value);
+        while (true) {
+          const headerEnd = findBytes(buffered, headerBreak);
+          if (headerEnd < 0) {
+            if (buffered.length > 8192) throw new Error('invalid frame header');
+            break;
+          }
+          const header = headerDecoder.decode(buffered.subarray(0, headerEnd));
+          const lengthMatch = /Content-Length:\s*(\d+)/i.exec(header);
+          const sequenceMatch = /X-Monadius-Frame:\s*(\d+)/i.exec(header);
+          if (!lengthMatch || !sequenceMatch) throw new Error('invalid frame metadata');
+          const length = Number(lengthMatch[1]);
+          if (!Number.isSafeInteger(length) || length <= 0 || length > 32 * 1024 * 1024) {
+            throw new Error('invalid frame length');
+          }
+          const jpegStart = headerEnd + headerBreak.length;
+          const jpegEnd = jpegStart + length;
+          if (buffered.length < jpegEnd + 2) break;
+          queueLatestFrame(sequenceMatch[1], buffered.slice(jpegStart, jpegEnd));
+          buffered = buffered.slice(jpegEnd + 2);
+        }
+      }
+    } catch (_) {
+      videoState.textContent = 'video: reconnecting';
+      await wait(100);
+    }
+  }
+}
 async function displayLatestFrames() {
   while (true) {
-    const requestStarted = performance.now();
+    const frame = await takeLatestFrame();
     try {
-      const response = await fetch('/latest-frame?after=' + displayedFrame,
-                                   {cache:'no-store'});
-      if (response.status === 204) continue;
-      if (!response.ok) throw new Error('frame request failed');
-      const encoded = await response.arrayBuffer();
-      if (encoded.byteLength <= 8) throw new Error('short frame response');
-      displayedFrame = new DataView(encoded, 0, 8).getBigUint64(0, false).toString();
-      const bitmap = await createImageBitmap(
-          new Blob([encoded.slice(8)], {type:'image/jpeg'}));
+      const bitmap = await createImageBitmap(new Blob([frame.jpeg], {type:'image/jpeg'}));
       if (screen.width !== bitmap.width || screen.height !== bitmap.height) {
         screen.width = bitmap.width; screen.height = bitmap.height;
         frameContext.imageSmoothingEnabled = false;
@@ -117,17 +182,15 @@ async function displayLatestFrames() {
       frameContext.drawImage(bitmap, 0, 0);
       bitmap.close();
 
-      videoFrames += 1;
+      displayedFrames += 1;
       const now = performance.now();
       if (now - videoWindowStarted >= 1000) {
-        const fps = (videoFrames * 1000 / (now - videoWindowStarted)).toFixed(1);
-        videoState.textContent = 'video: ' + fps + ' fps · ' +
-            Math.round(now - requestStarted) + ' ms/frame';
-        videoFrames = 0; videoWindowStarted = now;
+        const fps = (displayedFrames * 1000 / (now - videoWindowStarted)).toFixed(1);
+        videoState.textContent = 'video: ' + fps + ' fps · dropped ' + droppedFrames;
+        displayedFrames = 0; droppedFrames = 0; videoWindowStarted = now;
       }
     } catch (_) {
-      videoState.textContent = 'video: reconnecting';
-      await wait(100);
+      videoState.textContent = 'video: decode error';
     }
   }
 }
@@ -194,6 +257,7 @@ setInterval(() => {
     .catch(() => { engine.textContent = 'engine: unavailable'; });
 }, 500);
 send();
+receiveFrameStream();
 displayLatestFrames();
 pollAudioEvents();
 </script></body></html>"""
@@ -236,8 +300,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(payload)
             return
-        if request.path == "/latest-frame":
-            self.serve_latest_frame(request)
+        if request.path == "/frame-stream":
+            self.stream_frames()
             return
         if request.path == "/audio":
             self.serve_audio(request, head_only=False)
@@ -277,40 +341,50 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def serve_latest_frame(self, request: object) -> None:
+    def stream_frames(self) -> None:
+        boundary = b"monadiusframe"
+        self.send_response(200)
+        self.send_header(
+            "Content-Type",
+            "multipart/x-mixed-replace; boundary=" + boundary.decode("ascii"),
+        )
+        self.send_header(
+            "Cache-Control", "no-store, no-cache, must-revalidate, no-transform"
+        )
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        last_modified = -1
         try:
-            after = int(parse_qs(request.query).get("after", ["-1"])[0])
-        except ValueError:
-            after = -1
-        deadline = time.monotonic() + 10.0
-        while True:
-            try:
-                if self.frame_file.stat().st_mtime_ns > after:
+            while True:
+                try:
+                    if self.frame_file.stat().st_mtime_ns <= last_modified:
+                        time.sleep(0.002)
+                        continue
                     with self.frame_file.open("rb") as stream:
                         modified = os.fstat(stream.fileno()).st_mtime_ns
-                        if modified > after:
-                            frame = stream.read()
-                            break
-            except FileNotFoundError:
-                pass
-            if time.monotonic() >= deadline:
-                self.send_response(204)
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            time.sleep(0.004)
+                        if modified <= last_modified:
+                            continue
+                        frame = stream.read()
+                except FileNotFoundError:
+                    time.sleep(0.004)
+                    continue
 
-        payload = struct.pack(">Q", modified) + frame
-        self.send_response(200)
-        self.send_header("Content-Type", "application/x-monadius-frame")
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-        self.send_header("Content-Length", str(len(payload)))
-        self.send_header("X-Monadius-Frame", str(modified))
-        self.end_headers()
-        try:
-            self.wfile.write(payload)
-        except (BrokenPipeError, ConnectionResetError):
+                part = (
+                    b"--" + boundary + b"\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    + f"Content-Length: {len(frame)}\r\n".encode("ascii")
+                    + f"X-Monadius-Frame: {modified}\r\n\r\n".encode("ascii")
+                    + frame
+                    + b"\r\n"
+                )
+                chunk = f"{len(part):x}\r\n".encode("ascii") + part + b"\r\n"
+                self.wfile.write(chunk)
+                self.wfile.flush()
+                last_modified = modified
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
             return
 
     def do_HEAD(self) -> None:

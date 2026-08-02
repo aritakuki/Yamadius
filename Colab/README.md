@@ -7,16 +7,17 @@ outside that loop:
 ```text
 browser keys -> Colab bridge -> key file -> Haskell game loop
 Haskell/OpenGL -> NVIDIA EGL -> asynchronous PBO readback -> JPEG worker
-latest completed JPEG -> one in-flight browser request -> Canvas
+latest completed JPEG -> one continuous stream -> browser latest-frame slot -> Canvas
 game BGM/SE calls -> audio event stream -> browser audio elements
 ```
 
 GPU rendering never waits for JPEG compression or notebook networking.  The
-browser keeps exactly one frame request in flight and asks for the latest frame
-only after displaying its previous response.  No MJPEG/TCP frame queue can
-accumulate; when transport cannot keep up, intermediate captures are skipped
-and the newest completed capture is displayed.  Game updates and GPU rendering
-continue at their normal 16 ms cadence.
+browser keeps one continuous response open, so Colab proxy latency is not paid
+again for every frame.  The stream receiver drains incoming frames separately
+from Canvas decoding and keeps only one replaceable, not-yet-displayed frame.
+When display cannot keep up, intermediate captures are skipped instead of
+forming a browser-side frame queue.  Game updates and GPU rendering continue at
+their normal 16 ms cadence.
 
 ## Fresh Colab runtime
 
