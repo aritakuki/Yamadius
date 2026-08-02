@@ -37,8 +37,6 @@ const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'do
 function send() {
   const value = [...held].join(' ');
   state.textContent = 'keys: ' + (value || 'none');
-  fetch('/keys?value=' + encodeURIComponent(value), {cache:'no-store'})
-    .catch(() => { state.textContent = 'keys: bridge unavailable'; });
 }
 function token(e) {
   if (e.code === 'Space' || e.key === 'Spacebar') return 'space';
@@ -55,10 +53,13 @@ addEventListener('keyup', e => { const k = token(e); if (k) {
 }});
 addEventListener('blur', () => { held.clear(); send(); });
 screen.addEventListener('click', () => { screen.focus(); bgm.play().catch(() => {}); });
-// Do not depend on the browser's key-repeat rate.  Colab's iframe proxy also
-// transfers JPEG frames, so resend held controls while the key is down.
-setInterval(() => { if (held.size) send(); }, 100);
-setInterval(() => { screen.src = '/frame.jpg?t=' + Date.now(); }, 1000 / 20);
+// Colab already proxies every frame request successfully.  Carry the held
+// keys on that same request instead of relying on a second fetch channel,
+// which can be dropped by the notebook iframe proxy.
+setInterval(() => {
+  const keys = [...held].join(' ');
+  screen.src = '/frame.jpg?t=' + Date.now() + '&keys=' + encodeURIComponent(keys);
+}, 1000 / 20);
 </script></body></html>"""
 
 
@@ -75,6 +76,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if request.path == "/":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.end_headers()
             self.wfile.write(PAGE.encode("utf-8"))
             return
@@ -85,6 +87,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         if request.path == "/frame.jpg" and self.frame_file.is_file():
+            query = parse_qs(request.query, keep_blank_values=True)
+            if "keys" in query:
+                write_atomically(self.input_file, query["keys"][0])
             self.send_response(200)
             self.send_header("Content-Type", "image/jpeg")
             self.send_header("Cache-Control", "no-store")
