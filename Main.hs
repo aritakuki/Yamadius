@@ -13,6 +13,7 @@ module Main (main) where
 
 import           Control.Exception  (SomeException (..), catch)
 import           Control.Monad      (mplus, zipWithM_)
+import qualified Data.ByteString.Char8 as BS
 import qualified Codec.Picture       as JP
 import           Control.Applicative
 import           Data.Complex
@@ -239,7 +240,11 @@ refreshExternalKeys Nothing _ = return ()
 refreshExternalKeys (Just filename) keystate = do
   exists <- doesFileExist filename
   when exists $ do
-    contents <- readFile filename `catch` (\(SomeException _) -> return "")
+    -- The browser bridge replaces this file atomically.  Use a strict read:
+    -- lazy 'readFile' can defer reading until after a later replacement and
+    -- then leave the title scene observing an older key snapshot.
+    contents <- BS.unpack <$> BS.readFile filename
+      `catch` (\(SomeException _) -> return BS.empty)
     writeIORef keystate (nub (mapMaybe externalKey (words contents)))
   where
     externalKey token = case token of
