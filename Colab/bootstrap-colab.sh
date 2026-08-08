@@ -16,6 +16,7 @@ apt-get -qq update
 apt-get -qq install -y \
   git wget unzip cmake build-essential \
   xserver-xorg-core ffmpeg x11-apps \
+  fonts-liberation2 fonts-takao-mincho \
   freeglut3-dev libgl1-mesa-dev libegl1-mesa-dev libopengl-dev libglu1-mesa-dev \
   libalut-dev libfreetype6-dev libglew-dev libglfw3-dev libjpeg-dev \
   libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libxcursor-dev \

@@ -13,6 +13,7 @@ FRAME_FILE="$RUNTIME_DIR/frame.jpg"
 INPUT_FILE="$RUNTIME_DIR/keys"
 STATUS_FILE="$RUNTIME_DIR/game-status"
 AUDIO_EVENT_FILE="$RUNTIME_DIR/audio-events"
+AUDIO_CACHE_DIR="$RUNTIME_DIR/audio-cache"
 VENDOR_FILE="$RUNTIME_DIR/nvidia-egl.json"
 BRIDGE_READY_FILE="$RUNTIME_DIR/bridge.ready"
 
@@ -47,6 +48,7 @@ kill -0 "$XVFB_PID"
 python3 "$ROOT_DIR/Colab/monadius_colab_bridge.py" \
   --port "$PORT" --frame-file "$FRAME_FILE" --input-file "$INPUT_FILE" \
   --asset-root "$ROOT_DIR" --audio-event-file "$AUDIO_EVENT_FILE" \
+  --audio-cache-root "$AUDIO_CACHE_DIR" \
   --status-file "$STATUS_FILE" \
   --ready-file "$BRIDGE_READY_FILE" \
   >"$RUNTIME_DIR/bridge.log" 2>&1 &
@@ -68,6 +70,29 @@ if ! test -f "$BRIDGE_READY_FILE"; then
   echo "Timed out waiting for the Colab bridge on port $PORT." >&2
   exit 1
 fi
+
+# bootstrap-colab.sh installs these fonts in a new runtime.  This one-time
+# fallback also upgrades an already-running Colab VM after a plain git pull.
+if ! { test -f /usr/share/fonts/liberation-serif-fonts/LiberationSerif-Italic.ttf ||
+       test -f /usr/share/fonts/truetype/liberation2/LiberationSerif-Italic.ttf ||
+       test -f /usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf; } ||
+   ! { test -f /usr/share/fonts/takao/TakaoMincho.ttf ||
+       test -f /usr/share/fonts/truetype/takao-mincho/TakaoMincho.ttf; }; then
+  printf 'preparing caption fonts\n' >"$STATUS_FILE"
+  if (( EUID != 0 )); then
+    echo "Colab caption fonts are missing; run as root to install them." >&2
+    exit 1
+  fi
+  apt-get -qq update
+  DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \
+    fonts-liberation2 fonts-takao-mincho
+fi
+
+# Large PCM BGM files can monopolise Colab's notebook proxy connections and
+# delay both key releases and effect events.  Main still uses the WAV assets;
+# only the browser receives compact Ogg/Opus copies from this persistent cache.
+printf 'preparing browser audio\n' >"$STATUS_FILE"
+bash "$ROOT_DIR/Colab/prepare-browser-audio.sh" "$ROOT_DIR" "$AUDIO_CACHE_DIR"
 
 cd "$ROOT_DIR"
 env \
