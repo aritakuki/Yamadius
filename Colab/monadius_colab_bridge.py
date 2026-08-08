@@ -21,6 +21,9 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 
+FRAME_STREAM_INTERVAL_SECONDS = 1.0 / 30.0
+
+
 PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Monadius</title>
 <style>
@@ -48,23 +51,78 @@ const activeSounds = new Map();
 const movementTokens = new Set(['left', 'right', 'up', 'down']);
 const inputGeneration = Date.now();
 let inputSequence = 0;
+let pendingInput = null;
+let inputInFlight = null;
+let inputFlushTimer = null;
 let audioOffset = -1;
 let audioUnlocked = false;
+let audioPollController = null;
+let statusPollController = null;
 const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
                ' ':'space', a:'a', A:'a', f:'f', F:'f', g:'g', G:'g'};
-function send() {
-  const value = [...held].join(' ');
-  const sequence = ++inputSequence;
+function inputValue() {
+  return [...held].join(' ');
+}
+function scheduleInputFlush(delay) {
+  if (inputFlushTimer !== null) clearTimeout(inputFlushTimer);
+  inputFlushTimer = setTimeout(() => {
+    inputFlushTimer = null;
+    flushInput();
+  }, delay);
+}
+function send(preemptWaitingRequests = false) {
+  const value = inputValue();
+  const next = {sequence: ++inputSequence, value};
+  pendingInput = next;
   state.textContent = 'keys: ' + (value || 'none');
-  const query = new URLSearchParams({generation:String(inputGeneration),
-                                     sequence:String(sequence), value});
-  fetch('/keys?' + query.toString(), {cache:'no-store'})
-    .catch(() => {
-      if (sequence === inputSequence) {
-        state.textContent = 'keys: bridge unavailable';
-        setTimeout(send, 50);
-      }
+
+  // A release or changed direction must not wait behind the old snapshot.
+  // Heartbeats with the same value leave the current request alone.
+  if (inputInFlight !== null && inputInFlight.value !== value) {
+    inputInFlight.controller.abort();
+  }
+  if (preemptWaitingRequests) {
+    if (audioPollController !== null) audioPollController.abort();
+    if (statusPollController !== null) statusPollController.abort();
+  }
+  scheduleInputFlush(0);
+}
+async function flushInput() {
+  if (inputInFlight !== null || pendingInput === null) return;
+  const snapshot = pendingInput;
+  pendingInput = null;
+  const controller = new AbortController();
+  inputInFlight = {...snapshot, controller};
+  const timeout = setTimeout(() => controller.abort(), 750);
+  let retryDelay = 0;
+  try {
+    const query = new URLSearchParams({generation:String(inputGeneration),
+                                       sequence:String(snapshot.sequence),
+                                       value:snapshot.value});
+    const response = await fetch('/keys?' + query.toString(), {
+      cache:'no-store', signal:controller.signal, priority:'high'
     });
+    if (!response.ok) throw new Error('input request failed');
+    if (pendingInput === null && inputValue() === snapshot.value) {
+      state.textContent = 'keys: ' + (snapshot.value || 'none');
+    }
+  } catch (_) {
+    // Keep only the newest unsent snapshot.  An aborted request may already
+    // have reached the bridge; repeating its sequence is safe and bounded.
+    const hasNewerSnapshot = pendingInput !== null &&
+                             pendingInput.sequence > snapshot.sequence;
+    if (pendingInput === null || pendingInput.sequence < snapshot.sequence) {
+      pendingInput = snapshot;
+    }
+    state.textContent = 'keys: ' + (inputValue() || 'none') + ' · retrying';
+    retryDelay = hasNewerSnapshot ? 0 : 50;
+  } finally {
+    clearTimeout(timeout);
+    if (inputInFlight !== null && inputInFlight.sequence === snapshot.sequence) {
+      inputInFlight = null;
+    }
+    if (pendingInput !== null) scheduleInputFlush(retryDelay);
+  }
 }
 function token(e) {
   if (e.code === 'Space' || e.key === 'Spacebar') return 'space';
@@ -73,7 +131,7 @@ function token(e) {
 addEventListener('keydown', e => { const k = token(e); if (k) {
   clearTimeout(releases.get(k));
   if (!held.has(k)) {
-    held.add(k); pressedAt.set(k, performance.now()); send();
+    held.add(k); pressedAt.set(k, performance.now()); send(true);
   }
   e.preventDefault();
 }});
@@ -83,13 +141,13 @@ addEventListener('keyup', e => { const k = token(e); if (k) {
   // Movement must stop at keyup.  Only very short action taps are extended
   // enough for Main's next 16 ms input poll to observe them.
   const delay = movementTokens.has(k) ? 0 : Math.max(0, 80 - heldFor);
-  const release = () => { held.delete(k); pressedAt.delete(k); send(); };
+  const release = () => { held.delete(k); pressedAt.delete(k); send(true); };
   if (delay === 0) release(); else releases.set(k, setTimeout(release, delay));
   e.preventDefault();
 }});
 addEventListener('blur', () => {
   for (const timeout of releases.values()) clearTimeout(timeout);
-  releases.clear(); pressedAt.clear(); held.clear(); send();
+  releases.clear(); pressedAt.clear(); held.clear(); send(true);
 });
 
 let pendingFrame = null;
@@ -229,18 +287,53 @@ function applyAudioEvent(event) {
   }
 }
 async function pollAudioEvents() {
+  if (inputInFlight !== null || pendingInput !== null) {
+    setTimeout(pollAudioEvents, 50);
+    return;
+  }
   let retryDelay = 0;
+  const controller = new AbortController();
+  audioPollController = controller;
   try {
-    const response = await fetch('/audio-events?offset=' + audioOffset, {cache:'no-store'});
+    const response = await fetch('/audio-events?offset=' + audioOffset,
+                                 {cache:'no-store', signal:controller.signal});
     if (!response.ok) throw new Error('audio event request failed');
     const update = await response.json();
     audioOffset = update.offset;
     for (const event of update.events) applyAudioEvent(event);
   } catch (_) {
-    audioState.textContent = 'audio: bridge unavailable';
-    retryDelay = 250;
+    if (!controller.signal.aborted) {
+      audioState.textContent = 'audio: bridge unavailable';
+      retryDelay = 250;
+    } else {
+      retryDelay = 50;
+    }
+  } finally {
+    if (audioPollController === controller) audioPollController = null;
   }
   setTimeout(pollAudioEvents, retryDelay);
+}
+async function pollStatus() {
+  if (inputInFlight !== null || pendingInput !== null) {
+    setTimeout(pollStatus, 50);
+    return;
+  }
+  const controller = new AbortController();
+  statusPollController = controller;
+  const timeout = setTimeout(() => controller.abort(), 1000);
+  const retryDelay = 500;
+  try {
+    const response = await fetch('/status?t=' + Date.now(),
+                                 {cache:'no-store', signal:controller.signal});
+    if (!response.ok) throw new Error('status request failed');
+    engine.textContent = 'engine: ' + await response.text();
+  } catch (_) {
+    if (!controller.signal.aborted) engine.textContent = 'engine: unavailable';
+  } finally {
+    clearTimeout(timeout);
+    if (statusPollController === controller) statusPollController = null;
+  }
+  setTimeout(pollStatus, retryDelay);
 }
 screen.addEventListener('click', () => {
   screen.focus();
@@ -248,18 +341,13 @@ screen.addEventListener('click', () => {
   if (bgm.src) bgm.play().catch(() => {});
 });
 // A retry protects a held direction from a transient proxy request failure;
-// ordered sequence numbers prevent an older retry from undoing a newer keyup.
-setInterval(() => { if (held.size) send(); }, 250);
-setInterval(() => {
-  fetch('/status?t=' + Date.now(), {cache:'no-store'})
-    .then(response => response.ok ? response.text() : Promise.reject())
-    .then(value => { engine.textContent = 'engine: ' + value; })
-    .catch(() => { engine.textContent = 'engine: unavailable'; });
-}, 500);
-send();
+// coalescing guarantees that heartbeats never create an unbounded queue.
+setInterval(() => { if (held.size) send(false); }, 250);
+send(true);
 receiveFrameStream();
 displayLatestFrames();
 pollAudioEvents();
+pollStatus();
 </script></body></html>"""
 
 
@@ -356,8 +444,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
         last_modified = -1
+        next_frame_time = 0.0
         try:
             while True:
+                delay = next_frame_time - time.monotonic()
+                if delay > 0:
+                    time.sleep(min(delay, 0.01))
+                    continue
                 try:
                     if self.frame_file.stat().st_mtime_ns <= last_modified:
                         time.sleep(0.002)
@@ -383,6 +476,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 self.wfile.flush()
                 last_modified = modified
+                next_frame_time = time.monotonic() + FRAME_STREAM_INTERVAL_SECONDS
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             self.close_connection = True
             return
@@ -508,6 +602,7 @@ class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     # while the old socket is in TIME_WAIT.
     allow_reuse_address = True
     daemon_threads = True
+    request_queue_size = 64
 
 
 def write_atomically(path: Path, content: str) -> None:
