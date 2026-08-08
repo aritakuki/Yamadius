@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <initializer_list>
 #include <map>
 #include <string>
 #include <vector>
@@ -44,22 +46,46 @@ FT_Face stageThreeFontFace = nullptr;
 std::map<unsigned long, Glyph> subtitleGlyphs;
 std::map<unsigned long, Glyph> stageThreeGlyphs;
 
+bool loadSubtitleFace(const char* label, const char* environmentVariable,
+                      std::initializer_list<const char*> candidates,
+                      FT_Face* face) {
+  const char* configured = std::getenv(environmentVariable);
+  if (configured != nullptr && configured[0] != '\0' &&
+      FT_New_Face(subtitleFontLibrary, configured, 0, face) == 0) {
+    std::fprintf(stderr, "Monadius %s font: %s\n", label, configured);
+    return true;
+  }
+  for (const char* candidate : candidates) {
+    if (FT_New_Face(subtitleFontLibrary, candidate, 0, face) == 0) {
+      std::fprintf(stderr, "Monadius %s font: %s\n", label, candidate);
+      return true;
+    }
+  }
+  *face = nullptr;
+  std::fprintf(stderr, "Monadius %s font was not found\n", label);
+  return false;
+}
+
 void initializeSubtitleFont() {
   if (FT_Init_FreeType(&subtitleFontLibrary) != 0) return;
-  if (FT_New_Face(subtitleFontLibrary,
-                  "/usr/share/fonts/liberation-serif-fonts/LiberationSerif-Italic.ttf",
-                  0, &subtitleFontFace) != 0) {
-    subtitleFontFace = nullptr;
+  if (loadSubtitleFace(
+          "stage 2", "MONADIUS_STAGE_TWO_FONT",
+          {"/usr/share/fonts/liberation-serif-fonts/LiberationSerif-Italic.ttf",
+           "/usr/share/fonts/truetype/liberation2/LiberationSerif-Italic.ttf",
+           "/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf"},
+          &subtitleFontFace)) {
+    FT_Set_Pixel_Sizes(subtitleFontFace, 0, 30);
+  }
+  if (loadSubtitleFace(
+          "stage 3", "MONADIUS_STAGE_THREE_FONT",
+          {"/usr/share/fonts/takao/TakaoMincho.ttf",
+           "/usr/share/fonts/truetype/takao-mincho/TakaoMincho.ttf"},
+          &stageThreeFontFace)) {
+    FT_Set_Pixel_Sizes(stageThreeFontFace, 0, 44);
+  }
+  if (subtitleFontFace == nullptr && stageThreeFontFace == nullptr) {
     FT_Done_FreeType(subtitleFontLibrary);
     subtitleFontLibrary = nullptr;
-    return;
-  }
-  FT_Set_Pixel_Sizes(subtitleFontFace, 0, 30);
-  if (FT_New_Face(subtitleFontLibrary, "/usr/share/fonts/takao/TakaoMincho.ttf",
-                  0, &stageThreeFontFace) == 0) {
-    FT_Set_Pixel_Sizes(stageThreeFontFace, 0, 44);
-  } else {
-    stageThreeFontFace = nullptr;
   }
 }
 
@@ -264,6 +290,23 @@ extern "C" void renderStageTwoCaption(float alpha, int stageWidth, int stageHeig
   GLint matrixMode = GL_MODELVIEW;
   glGetIntegerv(GL_MATRIX_MODE, &matrixMode);
   glPushAttrib(GL_COLOR_BUFFER_BIT | GL_CURRENT_BIT | GL_ENABLE_BIT | GL_TEXTURE_BIT);
+  // Effekseer owns shaders and several GL state caches.  Captions are the
+  // final framebuffer overlay, so establish the complete fixed-function state
+  // explicitly instead of relying on whichever state its last draw retained.
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  glUseProgram(0);
+  glActiveTexture(GL_TEXTURE0);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glDisable(GL_SCISSOR_TEST);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_ALPHA_TEST);
+  glDisable(GL_CULL_FACE);
+  glDisable(GL_LIGHTING);
+  glDisable(GL_FOG);
+  glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+  glMatrixMode(GL_TEXTURE);
+  glPushMatrix();
+  glLoadIdentity();
   glMatrixMode(GL_PROJECTION);
   glPushMatrix();
   glLoadIdentity();
@@ -292,6 +335,8 @@ extern "C" void renderStageTwoCaption(float alpha, int stageWidth, int stageHeig
 
   glMatrixMode(GL_MODELVIEW);
   glPopMatrix();
+  glMatrixMode(GL_TEXTURE);
+  glPopMatrix();
   glMatrixMode(GL_PROJECTION);
   glPopMatrix();
   glMatrixMode(matrixMode);
@@ -307,6 +352,20 @@ extern "C" void renderStageThreeCaption(int revealedCharacters, int stageWidth,
   GLint matrixMode = GL_MODELVIEW;
   glGetIntegerv(GL_MATRIX_MODE, &matrixMode);
   glPushAttrib(GL_COLOR_BUFFER_BIT | GL_CURRENT_BIT | GL_ENABLE_BIT | GL_TEXTURE_BIT);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  glUseProgram(0);
+  glActiveTexture(GL_TEXTURE0);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glDisable(GL_SCISSOR_TEST);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_ALPHA_TEST);
+  glDisable(GL_CULL_FACE);
+  glDisable(GL_LIGHTING);
+  glDisable(GL_FOG);
+  glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+  glMatrixMode(GL_TEXTURE);
+  glPushMatrix();
+  glLoadIdentity();
   glMatrixMode(GL_PROJECTION);
   glPushMatrix();
   glLoadIdentity();
@@ -323,6 +382,8 @@ extern "C" void renderStageThreeCaption(int revealedCharacters, int stageWidth,
                      stageWidth * 0.5f - stageThreeTextWidth(caption) * 0.5f,
                      stageHeight * 0.5f - 16.0f);
   glMatrixMode(GL_MODELVIEW);
+  glPopMatrix();
+  glMatrixMode(GL_TEXTURE);
   glPopMatrix();
   glMatrixMode(GL_PROJECTION);
   glPopMatrix();

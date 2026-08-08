@@ -4,6 +4,7 @@ module Monadius (
   Monadius(..),
   initialMonadius,
   getVariables,
+  renderMonadiusCaptions,
   GameVariables(..),
   shotButton,
   missileButton,
@@ -1405,6 +1406,55 @@ newParticles n p v= do
     ps<- newParticles (n-1) p v
     return (new:ps)
 
+-- Colab has no GLUT game window.  Its 64x64 Xvfb exists only to initialise
+-- stroke fonts; the real render target is the NVIDIA EGL pbuffer.
+monadiusRenderTargetSize :: IO Size
+monadiusRenderTargetSize = do
+  eglMode <- lookupEnv "MONADIUS_EGL"
+  case eglMode of
+    Just _  -> return $ Size 1280 1040
+    Nothing -> get windowSize
+
+monadiusHudLayout :: GLsizei -> GLsizei -> (Int,Int,Int,Int,Int)
+monadiusHudLayout width height =
+  (stageLeft, hudPixels, stagePixels * 4 `div` 3, stagePixels, hudPixels)
+  where
+    fullWidth = fromIntegral width
+    fullHeight = fromIntegral height
+    minimumHudPixels = 90
+    availableHeight = max 1 (fullHeight - minimumHudPixels)
+    stagePixels = min availableHeight (fullWidth * 3 `div` 4)
+    hudPixels = fullHeight - stagePixels
+    stageLeft = (fullWidth - stagePixels * 4 `div` 3) `div` 2
+
+-- Captions are a final UI overlay.  Main invokes this after Effekseer so its
+-- renderer cannot cover the stage-introduction text on either GLX or EGL.
+renderMonadiusCaptions :: Monadius -> IO ()
+renderMonadiusCaptions (Monadius (variables,_)) = do
+  Size clientWidth clientHeight <- monadiusRenderTargetSize
+  let (stageX,stageY,stageWidth,stageHeight,_) =
+        monadiusHudLayout clientWidth clientHeight
+      gameclock = gameClock variables
+  viewport $= (Position (fromIntegral stageX) (fromIntegral stageY),
+               Size (fromIntegral stageWidth) (fromIntegral stageHeight))
+
+  -- Match the two-line intermission caption from the supplied reference.
+  -- It appears only at the start of stage 2 and fades over three seconds.
+  when (baseGameLevel variables == 2 && gameclock < 180) $ do
+    let captionAlpha
+          | gameclock < 30  = intToGLdouble gameclock / 30
+          | gameclock < 120 = 1
+          | otherwise       = 1 - intToGLdouble (gameclock - 120) / 60
+    c_renderStageTwoCaption (realToFrac captionAlpha)
+      (fromIntegral stageWidth) (fromIntegral stageHeight)
+
+  -- Reveal 「死ぬがよい。」 at five characters per second, then remove it
+  -- abruptly at the three-second mark.
+  when (baseGameLevel variables == 3 && gameclock < 180) $ do
+    let revealedCharacters = min 6 (gameclock `div` 12 + 1)
+    c_renderStageThreeCaption (fromIntegral revealedCharacters)
+      (fromIntegral stageWidth) (fromIntegral stageHeight)
+
 -------------------------
 --
 --  drawing
@@ -1415,8 +1465,8 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   putDebugStrLn $ show $ length objects
   let playerX :+ playerY = position vicViper
   c_setEffeksserPlayerPosition (realToFrac playerX) (realToFrac playerY)
-  Size clientWidth clientHeight <- renderTargetSize
-  let (stageX,stageY,stageWidth,stageHeight,hudHeight) = hudLayout clientWidth clientHeight
+  Size clientWidth clientHeight <- monadiusRenderTargetSize
+  let (stageX,stageY,stageWidth,stageHeight,hudHeight) = monadiusHudLayout clientWidth clientHeight
   -- Keep a 4:3 stage and add the HUD below it; both scale with the window.
   viewport $= (Position (fromIntegral stageX) (fromIntegral stageY),
                Size (fromIntegral stageWidth) (fromIntegral stageHeight))
@@ -1424,8 +1474,6 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   -- their faces from covering ships, shots, and the foreground UI.
   mapM_ renderGameObject $ filter isLandscape objects
   mapM_ renderGameObject $ filter (not . isGauge) $ filter (not . isLandscape) objects
-  renderStageTwoCaption stageWidth stageHeight
-  renderStageThreeCaption stageWidth stageHeight
   -- Particles leave an additive blend equation active.  With that equation a
   -- black source contributes nothing, so restore ordinary alpha compositing
   -- before drawing the opaque HUD backing.
@@ -1467,29 +1515,7 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   where
   scoreStr = "1P "  ++ ((padding '0' 8).show.totalScore) variables
   scoreStr2 = if isNothing $ playTitle variables then "HI "++((padding '0' 8).show.hiScore) variables else (fromJust $ playTitle variables)
-
   gameclock = gameClock variables
-
-  -- Match the two-line intermission caption from the supplied reference.
-  -- It appears only at the start of stage 2 and fades over three seconds.
-  renderStageTwoCaption :: Int -> Int -> IO ()
-  renderStageTwoCaption width height = when showCaption $ do
-    let captionAlpha
-          | gameclock < 30  = intToGLdouble gameclock / 30
-          | gameclock < 120 = 1
-          | otherwise       = 1 - intToGLdouble (gameclock - 120) / 60
-    c_renderStageTwoCaption (realToFrac captionAlpha) (fromIntegral width) (fromIntegral height)
-  showCaption = baseGameLevel variables == 2 && gameclock < 180
-
-  -- Reveal 「死ぬがよい。」 at five characters per second, then remove it
-  -- abruptly at the three-second mark.
-  renderStageThreeCaption :: Int -> Int -> IO ()
-  renderStageThreeCaption width height = when showCaption $ do
-    let revealedCharacters = min 6 (gameclock `div` 12 + 1)
-    c_renderStageThreeCaption (fromIntegral revealedCharacters)
-      (fromIntegral width) (fromIntegral height)
-    where
-      showCaption = baseGameLevel variables == 3 && gameclock < 180
 
   isLandscape :: GameObject -> Bool
   isLandscape LandScapeBlock{} = True
@@ -1499,33 +1525,12 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   isGauge PowerUpGauge{} = True
   isGauge _              = False
 
-  -- Colab has no GLUT game window.  Its 64x64 Xvfb exists only to initialise
-  -- stroke fonts; the real render target is the NVIDIA EGL pbuffer.
-  renderTargetSize :: IO Size
-  renderTargetSize = do
-    eglMode <- lookupEnv "MONADIUS_EGL"
-    case eglMode of
-      Just _  -> return $ Size 1280 1040
-      Nothing -> get windowSize
-
-  hudLayout :: GLsizei -> GLsizei -> (Int,Int,Int,Int,Int)
-  hudLayout width height = (stageLeft, hudPixels,
-                            stagePixels * 4 `div` 3, stagePixels, hudPixels)
-    where
-      fullWidth = fromIntegral width
-      fullHeight = fromIntegral height
-      minimumHudPixels = 90
-      availableHeight = max 1 (fullHeight - minimumHudPixels)
-      stagePixels = min availableHeight (fullWidth * 3 `div` 4)
-      hudPixels = fullHeight - stagePixels
-      stageLeft = (fullWidth - stagePixels * 4 `div` 3) `div` 2
-
   -- returns an IO monad that can render the object.
   renderGameObject :: GameObject -> IO ()
   renderGameObject gauge@PowerUpGauge{} = preservingMatrix $ do
     let x:+y = position gauge
-    Size clientWidth clientHeight <- renderTargetSize
-    let (_,_,_,_,currentHudHeight) = hudLayout clientWidth clientHeight
+    Size clientWidth clientHeight <- monadiusRenderTargetSize
+    let (_,_,_,_,currentHudHeight) = monadiusHudLayout clientWidth clientHeight
     blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
     depthFunc $= Just Always
     translate (Vector3 x (fromIntegral currentHudHeight - 35) 0)
