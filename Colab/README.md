@@ -42,6 +42,19 @@ Use arrow keys to move, `A` to shoot/use a missile, `F` to power up, Space to
 start, and `G` for self-destruct.  The header reports held keys, the current
 engine scene/clock, and the BGM selected by the game.
 
+Use the `別ウィンドウで開く` button to move the game Canvas into a dedicated
+browser window.  The authenticated Colab iframe stays in the notebook as the
+network owner, so the pop-up does not need a public tunnel and does not create a
+second frame or input connection.  Keep the notebook open while playing.  If
+the browser blocks the pop-up, allow pop-ups for `colab.research.google.com` and
+press the button again.  `セル内へ戻す` closes the game window and restores the
+Canvas in the notebook output.
+
+A hosted Colab VM cannot create a native OpenGL window on the user's desktop;
+the dedicated browser window is the independent-window mode for the remote GPU
+runtime.  Running Monadius locally (or connecting Colab to a local runtime) is
+required for the same native window used by the CPU build.
+
 ## Updating an existing runtime
 
 Changes to Haskell or C++ require rebuilding `Main`.  Use a new port to avoid

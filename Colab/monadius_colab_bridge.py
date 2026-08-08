@@ -29,21 +29,32 @@ PAGE = """<!doctype html>
 <style>
   html, body { margin: 0; background: #080b14; color: #dce8ff; font-family: sans-serif; }
   #help { padding: 8px 12px; }
+  #open-window { margin-right: 8px; padding: 5px 10px; cursor: pointer; }
+  #detached-message { display: none; min-height: 360px; box-sizing: border-box;
+                      padding: 120px 24px; text-align: center; color: #aebbd2; }
   #screen { display: block; width: auto; height: auto; max-width: 100%;
             max-height: calc(100vh - 92px); object-fit: contain; outline: none; }
+  body.detached #screen, body.detached #bgm { display: none; }
+  body.detached #detached-message { display: block; }
 </style></head><body>
-<div id="help">Click the game, then use arrow keys, A (shot/missile), F (power-up), Space (start), G (self-destruct). <span id="state">keys: none</span> · <span id="engine">engine: waiting</span> · <span id="video-state">video: waiting</span> · <span id="audio-state">audio: click game to enable</span></div>
+<div id="help"><button id="open-window" type="button">別ウィンドウで開く</button>Click the game, then use arrow keys, A (shot/missile), F (power-up), Space (start), G (self-destruct). <span id="state">keys: none</span> · <span id="engine">engine: waiting</span> · <span id="video-state">video: waiting</span> · <span id="audio-state">audio: click game to enable</span></div>
 <audio id="bgm" controls loop></audio>
 <canvas id="screen" tabindex="0" width="1280" height="1040">Monadius is starting…</canvas>
+<div id="detached-message">ゲームは別ウィンドウで実行中です。上のボタンでゲーム画面を前面に戻せます。</div>
 <script>
-const screen = document.getElementById('screen');
-const frameContext = screen.getContext('2d', {alpha:false});
+const inlineScreen = document.getElementById('screen');
+const inlineFrameContext = inlineScreen.getContext('2d', {alpha:false});
+let activeScreen = inlineScreen;
+let frameContext = inlineFrameContext;
 frameContext.imageSmoothingEnabled = false;
+const openWindowButton = document.getElementById('open-window');
 const state = document.getElementById('state');
 const engine = document.getElementById('engine');
 const videoState = document.getElementById('video-state');
 const bgm = document.getElementById('bgm');
 const audioState = document.getElementById('audio-state');
+let gameWindow = null;
+let gameWindowScreen = null;
 const held = new Set();
 const releases = new Map();
 const pressedAt = new Map();
@@ -128,14 +139,14 @@ function token(e) {
   if (e.code === 'Space' || e.key === 'Spacebar') return 'space';
   return names[e.key] || (/^[0-9]$/.test(e.key) ? e.key : null);
 }
-addEventListener('keydown', e => { const k = token(e); if (k) {
+function handleKeyDown(e) { const k = token(e); if (k) {
   clearTimeout(releases.get(k));
   if (!held.has(k)) {
     held.add(k); pressedAt.set(k, performance.now()); send(true);
   }
   e.preventDefault();
-}});
-addEventListener('keyup', e => { const k = token(e); if (k) {
+}}
+function handleKeyUp(e) { const k = token(e); if (k) {
   clearTimeout(releases.get(k));
   const heldFor = performance.now() - (pressedAt.get(k) || 0);
   // Movement must stop at keyup.  Only very short action taps are extended
@@ -144,11 +155,17 @@ addEventListener('keyup', e => { const k = token(e); if (k) {
   const release = () => { held.delete(k); pressedAt.delete(k); send(true); };
   if (delay === 0) release(); else releases.set(k, setTimeout(release, delay));
   e.preventDefault();
-}});
-addEventListener('blur', () => {
+}}
+function releaseAllKeys() {
   for (const timeout of releases.values()) clearTimeout(timeout);
   releases.clear(); pressedAt.clear(); held.clear(); send(true);
-});
+}
+function attachInput(targetWindow) {
+  targetWindow.addEventListener('keydown', handleKeyDown);
+  targetWindow.addEventListener('keyup', handleKeyUp);
+  targetWindow.addEventListener('blur', releaseAllKeys);
+}
+attachInput(window);
 
 let pendingFrame = null;
 let frameWaiter = null;
@@ -233,8 +250,8 @@ async function displayLatestFrames() {
     const frame = await takeLatestFrame();
     try {
       const bitmap = await createImageBitmap(new Blob([frame.jpeg], {type:'image/jpeg'}));
-      if (screen.width !== bitmap.width || screen.height !== bitmap.height) {
-        screen.width = bitmap.width; screen.height = bitmap.height;
+      if (activeScreen.width !== bitmap.width || activeScreen.height !== bitmap.height) {
+        activeScreen.width = bitmap.width; activeScreen.height = bitmap.height;
         frameContext.imageSmoothingEnabled = false;
       }
       frameContext.drawImage(bitmap, 0, 0);
@@ -335,11 +352,94 @@ async function pollStatus() {
   }
   setTimeout(pollStatus, retryDelay);
 }
-screen.addEventListener('click', () => {
-  screen.focus();
+function enableAudio() {
   audioUnlocked = true;
   if (bgm.src) bgm.play().catch(() => {});
+}
+inlineScreen.addEventListener('click', () => {
+  inlineScreen.focus();
+  enableAudio();
 });
+function closeGameWindowState(closingWindow) {
+  if (gameWindow !== closingWindow) return;
+  releaseAllKeys();
+  gameWindow = null;
+  gameWindowScreen = null;
+  activeScreen = inlineScreen;
+  frameContext = inlineFrameContext;
+  frameContext.imageSmoothingEnabled = false;
+  document.body.classList.remove('detached');
+  openWindowButton.textContent = '別ウィンドウで開く';
+}
+function syncGameWindowStatus() {
+  if (gameWindow === null) return;
+  if (gameWindow.closed) {
+    closeGameWindowState(gameWindow);
+    return;
+  }
+  const popupDocument = gameWindow.document;
+  popupDocument.getElementById('popup-state').textContent = state.textContent;
+  popupDocument.getElementById('popup-engine').textContent = engine.textContent;
+  popupDocument.getElementById('popup-video').textContent = videoState.textContent;
+  popupDocument.getElementById('popup-audio').textContent = audioState.textContent;
+}
+function openGameWindow() {
+  enableAudio();
+  if (gameWindow !== null && !gameWindow.closed) {
+    gameWindow.focus();
+    if (gameWindowScreen !== null) gameWindowScreen.focus();
+    return;
+  }
+  const width = Math.min(1320, Math.max(760, window.screen.availWidth - 80));
+  const height = Math.min(1120, Math.max(700, window.screen.availHeight - 80));
+  const opened = window.open('', 'monadius-game',
+      `popup=yes,width=${width},height=${height},resizable=yes`);
+  if (opened === null) {
+    openWindowButton.textContent = 'ポップアップを許可して再試行';
+    return;
+  }
+  opened.document.open();
+  opened.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Monadius</title>
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden;
+                   background: #080b14; color: #dce8ff; font-family: sans-serif; }
+      #popup-help { box-sizing: border-box; min-height: 68px; padding: 8px 12px;
+                    font-size: 13px; line-height: 1.45; }
+      #close-window { float: right; margin-left: 12px; padding: 5px 10px; cursor: pointer; }
+      #game-screen { display: block; margin: 0 auto; width: auto; height: auto;
+                     max-width: 100vw; max-height: calc(100vh - 68px);
+                     object-fit: contain; outline: none; }
+    </style></head><body>
+    <div id="popup-help"><button id="close-window" type="button">セル内へ戻す</button>
+      Arrow keys: move · A: shot/missile · F: power-up · Space: start · G: self-destruct<br>
+      <span id="popup-state">keys: none</span> · <span id="popup-engine">engine: waiting</span> ·
+      <span id="popup-video">video: waiting</span> · <span id="popup-audio">audio: waiting</span>
+    </div><canvas id="game-screen" tabindex="0"></canvas></body></html>`);
+  opened.document.close();
+
+  const popupScreen = opened.document.getElementById('game-screen');
+  popupScreen.width = inlineScreen.width;
+  popupScreen.height = inlineScreen.height;
+  const popupContext = popupScreen.getContext('2d', {alpha:false});
+  popupContext.imageSmoothingEnabled = false;
+  popupContext.drawImage(inlineScreen, 0, 0);
+
+  gameWindow = opened;
+  gameWindowScreen = popupScreen;
+  activeScreen = popupScreen;
+  frameContext = popupContext;
+  attachInput(opened);
+  opened.addEventListener('beforeunload', () => closeGameWindowState(opened));
+  popupScreen.addEventListener('click', () => { popupScreen.focus(); enableAudio(); });
+  opened.document.getElementById('close-window').addEventListener('click', () => opened.close());
+  document.body.classList.add('detached');
+  openWindowButton.textContent = 'ゲーム画面を前面に戻す';
+  syncGameWindowStatus();
+  opened.focus();
+  popupScreen.focus();
+}
+openWindowButton.addEventListener('click', openGameWindow);
+setInterval(syncGameWindowStatus, 250);
 // A retry protects a held direction from a transient proxy request failure;
 // coalescing guarantees that heartbeats never create an unbounded queue.
 setInterval(() => { if (held.size) send(false); }, 250);
