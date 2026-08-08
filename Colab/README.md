@@ -19,12 +19,6 @@ When display cannot keep up, intermediate captures are skipped instead of
 forming a browser-side frame queue.  Game updates and GPU rendering continue at
 their normal 16 ms cadence.
 
-The browser receives a one-time Ogg/Opus cache instead of the very large PCM
-WAV files used by the native game, and audio Range responses are bounded so a
-BGM transfer cannot occupy every notebook-proxy connection.  Key input and
-effect-event polling remain independent; if key heartbeats stop reaching the
-bridge, a held direction is released automatically instead of remaining stuck.
-
 ## Fresh Colab runtime
 
 Select a GPU runtime, then run this shell cell once.  It installs dependencies,
@@ -73,12 +67,6 @@ an old iframe response remaining in the notebook output:
 %env MONADIUS_PORT=8771
 %run Colab/fresh_start.py
 ```
-
-On the first start after this update, the runner may briefly report
-`preparing caption fonts` or `preparing browser audio`.  It installs the two
-caption font packages when an older live runtime does not have them, then keeps
-the converted browser audio under `/tmp/monadius-colab/audio-cache` for later
-Fresh Starts in the same VM.
 
 `fresh_start.py` stops prior Monadius/bridge/Xvfb processes, waits for the new
 bridge to own the selected port, and embeds it.  Xvfb exists only to initialise

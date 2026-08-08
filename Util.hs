@@ -33,7 +33,6 @@ import           Data.Complex
 import           Data.List                 (intersperse)
 import           Data.Maybe
 import           Data.IORef                (IORef, newIORef, readIORef, writeIORef)
-import           Data.Time.Clock.POSIX      (getPOSIXTime)
 import           Graphics.Rendering.OpenGL
 import           Sound.ALUT
 import           Foreign.C.Types           (CFloat)
@@ -204,17 +203,12 @@ emitAudioEvent action asset = do
     eventFile <- lookupEnv "MONADIUS_AUDIO_EVENT_FILE"
     forM_ eventFile $ \filename -> do
         channel <- audioEventChannel filename
-        (path, gain) <- case asset of
-          Nothing -> return ("", 1.0)
+        fields <- case asset of
+          Nothing -> return ""
           Just sound -> do
-            currentGain <- readIORef $ soundGain sound
-            return (soundPath sound, currentGain)
-        -- Browser effects are real-time events, not a replay log.  A wall-clock
-        -- timestamp lets the Colab bridge discard an effect that sat behind a
-        -- congested media transfer instead of playing it seconds too late.
-        emittedAt <- floor . (* 1000) <$> getPOSIXTime :: IO Integer
-        writeChan channel $ action ++ "\t" ++ path ++ "\t" ++ show gain ++
-          "\t" ++ show emittedAt ++ "\n"
+            gain <- readIORef $ soundGain sound
+            return $ "\t" ++ soundPath sound ++ "\t" ++ show gain
+        writeChan channel $ action ++ fields ++ "\n"
 
 backgroundMusic :: SoundAsset -> IO ()
 backgroundMusic asset = do

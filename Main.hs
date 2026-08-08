@@ -482,7 +482,6 @@ mainProc shieldTextures ses sounds vars gs ks = do
   render shieldTextures keystate gamestate
 
   c_procEffeksser
-  renderMonadiusCaptions (gameBody gamestate)
 
   presentFrame
   let currentLevel = baseGameLevel$getVariables$gameBody gamestate

@@ -37,7 +37,7 @@ if [[ "${MONADIUS_COLAB_EGL:-}" == "1" ]]; then
 fi
 
 ghc -lstdc++ \
-  -package JuicyPixels -package vector -package random -package time \
+  -package JuicyPixels -package vector -package random \
   -optc-I"$EFFEKSEER_PREFIX/include" \
   -optc-I"$EFFEKSEER_PREFIX/include/Effekseer" \
   -optc-I/usr/include/freetype2 \
