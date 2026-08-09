@@ -4,6 +4,10 @@
 Colab上の配置先はMonadiusが `/content/Yamadius-colab`、Lispが
 `/content/lisp-raytracer` です。
 
+以前の同一プロセス版 `feature/live-raytraced-background` とは別ブランチです。
+完全セットアップでは自動的に新ブランチを取得します。既存のColab環境を更新する
+場合は、後述の手順で両リポジトリを明示的に新ブランチへ切り替えてください。
+
 ## 最初に知っておくこと
 
 - Colabのランタイムが初期化されると、`/content` 以下はすべて消えます。
@@ -112,13 +116,14 @@ output.serve_kernel_port_as_iframe(8765, height=1100)
 
 ```python
 %cd /content/Yamadius-colab
-!git branch --show-current
+!git fetch origin feature/shared-memory-ray-background
+!git switch feature/shared-memory-ray-background
 !git pull --ff-only
 ```
 
-期待されるブランチは `feature/shared-memory-ray-background` です。HaskellまたはC++が
-更新された場合は、続けてビルドします。ColabブリッジなどPythonファイルだけの
-更新なら、このビルドは不要です。
+`git switch` 後に表示されるブランチは `feature/shared-memory-ray-background` です。
+HaskellまたはC++が更新された場合は、続けてビルドします。Colabブリッジなど
+Pythonファイルだけの更新なら、このビルドは不要です。
 
 ```bash
 !MONADIUS_COLAB_EGL=1 EFFEKSEER_PREFIX=/content/effekseer-install bash build.sh
@@ -128,7 +133,8 @@ Lisp側が更新された場合は、Lisp用ブランチも取得し、別プロ
 共有メモリライブラリを作り直します。
 
 ```bash
-!git -C /content/lisp-raytracer branch --show-current
+!git -C /content/lisp-raytracer fetch origin feature/shared-memory-ray-background
+!git -C /content/lisp-raytracer switch feature/shared-memory-ray-background
 !git -C /content/lisp-raytracer pull --ff-only
 !bash Colab/build-ray-background-runtime.sh /content/lisp-raytracer /content/monadius-ray-runtime
 ```
@@ -155,3 +161,16 @@ Lisp側が更新された場合は、Lisp用ブランチも取得し、別プロ
 `game.log` に `Live CUDA background published frame 1` と
 `OpenGL accepted the first complete Lisp background` が記録されます。Lispプロセスと
 ゲーム描画は並行しているため、この2行の記録順は前後することがあります。
+
+## 8. 今回の検証範囲
+
+CUDAのないローカル環境では、別プロセスのSBCLが既知の色パターンを匿名共有RAMへ
+公開し、Haskellが世代更新を検知してゲーム背景として描画するところまで確認済みです。
+これはプロセス起動、共有メモリ、3バッファ同期、OpenGL取込み、背景の描画順を確認する
+ためのテストであり、色パターン自体はレイトレーシング結果ではありません。
+
+実際のcl-cudaレイトレーシング結果が同じ経路を通って背景になることの最終確認は、
+CUDAを使用できるColab上で行います。ゲーム画面にレイトレーシング画像が背景として
+表示され、Haskellの機体・地形・HUDがその前面に描かれていることを確認してください。
+同時に `game.log` の上記2行、Spaceでゲームが開始すること、画面が交互表示や点滅を
+しないことも確認します。
