@@ -44,7 +44,15 @@ fi
 
 cd "$REPO_DIR"
 cabal update
-cabal install --lib OpenGL GLUT ALUT JuicyPixels vector random
+# cabal install --lib otherwise reuses the user's default GHC environment.
+# A previous Colab run can therefore pin a newly released transitive package
+# (for example containers-0.8) that is outside GLUT's supported range.  Build
+# a fresh, private environment on every bootstrap and pass that exact
+# environment to GHC below.
+HASKELL_PACKAGE_ENV_DIR="$(mktemp -d /tmp/monadius-ghc-env.XXXXXX)"
+HASKELL_PACKAGE_ENV="$HASKELL_PACKAGE_ENV_DIR/environment"
+cabal install --lib --package-env="$HASKELL_PACKAGE_ENV" \
+  OpenGL GLUT ALUT JuicyPixels vector random
 
 wget -q -O "$EFFEKSEER_ARCHIVE" \
   https://github.com/effekseer/Effekseer/releases/download/160e/EffekseerRuntime160e.zip
@@ -53,7 +61,8 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
-MONADIUS_COLAB_EGL=1 EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" bash build.sh
+GHC_ENVIRONMENT="$HASKELL_PACKAGE_ENV" \
+  MONADIUS_COLAB_EGL=1 EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" bash build.sh
 bash Colab/fresh-start.sh
 
 cat <<'EOF'
