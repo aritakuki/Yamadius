@@ -9,6 +9,8 @@ outside that loop:
 
 ```text
 browser keys -> Colab bridge -> key file -> Haskell game loop
+Lisp/CUDA worker -> complete RGB frame -> in-process C++ double buffer + generation
+Haskell frame -> new generation only: OpenGL texture upload -> draw current background
 Haskell/OpenGL -> NVIDIA EGL -> asynchronous PBO readback -> JPEG worker
 latest completed JPEG -> one continuous stream -> browser latest-frame slot -> Canvas
 game BGM/SE calls -> audio event stream -> browser audio elements
@@ -22,6 +24,13 @@ When display cannot keep up, intermediate captures are skipped instead of
 forming a browser-side frame queue.  Game updates and GPU rendering continue at
 their normal 16 ms cadence.
 
+The raytracer runs as an SBCL worker inside the `Main` process.  It owns its
+CUDA context and renders continuously without being called by the game loop.
+Haskell never waits for a raytraced frame.  When Lisp has not published a new
+generation, the OpenGL upload is skipped and the previous complete texture is
+drawn again.  The textured quad itself is drawn after every color-buffer clear;
+otherwise the previous background would not survive into the next game frame.
+
 The browser receives a one-time Ogg/Opus cache instead of the very large PCM
 WAV files used by the native game, and audio Range responses are bounded so a
 BGM transfer cannot occupy every notebook-proxy connection.  Input transitions
@@ -33,11 +42,13 @@ is released automatically instead of remaining stuck.
 ## Fresh Colab runtime
 
 Select a GPU runtime, then run this shell cell once.  It installs dependencies,
-checks out `feature/colab-interactive-monadius`, builds Effekseer and Monadius,
-and starts the local bridge:
+checks out `feature/live-raytraced-background` in both the Monadius and Lisp
+repositories, builds the callable SBCL runtime, Effekseer, and Monadius, and
+starts the local bridge.  The first build takes longer because SBCL is compiled
+once under `/content/monadius-ray-runtime`:
 
 ```bash
-!curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/colab-interactive-monadius/Colab/bootstrap-colab.sh | bash
+!curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/live-raytraced-background/Colab/bootstrap-colab.sh | bash
 ```
 
 Embed the game from a Python cell:
@@ -78,6 +89,18 @@ an old iframe response remaining in the notebook output:
 %env MONADIUS_PORT=8771
 %run Colab/fresh_start.py
 ```
+
+Changes to the Lisp renderer require pulling its branch and rebuilding the
+callable core before restarting `Main`:
+
+```bash
+!git -C /content/lisp-raytracer pull --ff-only
+!bash Colab/build-ray-background-runtime.sh /content/lisp-raytracer /content/monadius-ray-runtime
+```
+
+The default live render size is 800x600.  It can be changed for a restart with
+`MONADIUS_RAY_WIDTH` and `MONADIUS_RAY_HEIGHT`; this changes raytracer cadence,
+not the Haskell game-loop cadence.
 
 On the first start after this update, the runner may briefly report
 `preparing caption fonts` or `preparing browser audio`.  It installs the two

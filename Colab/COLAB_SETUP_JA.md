@@ -1,7 +1,8 @@
 # Monadius Colab 初期セットアップ・再接続手順
 
-対象ブランチは `feature/colab-interactive-monadius`、Colab上の配置先は
-`/content/Yamadius-colab` です。
+対象ブランチは両リポジトリとも `feature/live-raytraced-background` です。
+Colab上の配置先はMonadiusが `/content/Yamadius-colab`、Lispが
+`/content/lisp-raytracer` です。
 
 ## 最初に知っておくこと
 
@@ -32,10 +33,12 @@ print("既存環境あり" if repo.is_dir() else "初期状態（再セットア
 ## 2. 完全セットアップ：`/content/Yamadius-colab` がない場合
 
 ColabでGPUランタイムを選択してから、次のシェルセルを一度だけ実行します。
-依存パッケージ、リポジトリ、Effekseer、Monadiusをすべて準備し、ポート8765で起動します。
+依存パッケージ、両リポジトリ、Lispを埋め込むSBCL共有ランタイム、Effekseer、
+Monadiusをすべて準備し、ポート8765で起動します。初回はSBCLもビルドするため、
+従来より時間がかかります。
 
 ```bash
-!curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/colab-interactive-monadius/Colab/bootstrap-colab.sh | bash
+!curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/live-raytraced-background/Colab/bootstrap-colab.sh | bash
 ```
 
 完了したら、次のPythonセルで画面を表示します。bootstrap処理がすでにゲームを
@@ -112,13 +115,26 @@ output.serve_kernel_port_as_iframe(8765, height=1100)
 !git pull --ff-only
 ```
 
-期待されるブランチは `feature/colab-interactive-monadius` です。HaskellまたはC++が
+期待されるブランチは `feature/live-raytraced-background` です。HaskellまたはC++が
 更新された場合は、続けてビルドします。ColabブリッジなどPythonファイルだけの
 更新なら、このビルドは不要です。
 
 ```bash
 !MONADIUS_COLAB_EGL=1 EFFEKSEER_PREFIX=/content/effekseer-install bash build.sh
 ```
+
+Lisp側が更新された場合は、Lisp用ブランチも取得し、同一プロセス呼び出し用の
+コアを作り直します。
+
+```bash
+!git -C /content/lisp-raytracer branch --show-current
+!git -C /content/lisp-raytracer pull --ff-only
+!bash Colab/build-ray-background-runtime.sh /content/lisp-raytracer /content/monadius-ray-runtime
+```
+
+Lispは完成した画像だけを世代番号付き二重バッファへ公開します。Haskellは世代が
+変わった時だけテクスチャ内容を更新し、Lispが計算中なら直前の完成画像をそのまま
+使います。ゲーム側の更新や描画がLispの完了を待つことはありません。
 
 その後、「既存環境のクリーン再起動」の `%run Colab/fresh_start.py` を実行します。
 
@@ -132,4 +148,6 @@ output.serve_kernel_port_as_iframe(8765, height=1100)
 ```
 
 正常時は、`run-colab.sh`、`monadius_colab_bridge.py`、`Xvfb :99`、`./Main`が
-それぞれ一つずつ表示されます。
+それぞれ一つずつ表示されます。最初の背景が完成してゲーム画面に取り込まれると、
+`game.log` に `Live CUDA background published frame 1` と
+`OpenGL accepted the first complete Lisp background` がこの順で記録されます。

@@ -32,6 +32,12 @@ fi
 # executable resolves it through the NVIDIA GLVND driver at runtime; do not
 # reject that shared-library reference while linking the Haskell binary.
 LINKER_OPTIONS=()
+LINKER_OPTIONS+=(
+  -optl-Wl,--export-dynamic-symbol=monadius_lisp_ray_background_run
+  -optl-Wl,--export-dynamic-symbol=monadiusRayBackgroundShouldStop
+  -optl-Wl,--export-dynamic-symbol=monadiusPublishRayBackgroundRgb
+  -optl-Wl,--export-dynamic-symbol=monadiusReportRayBackgroundError
+)
 if [[ "${MONADIUS_COLAB_EGL:-}" == "1" ]]; then
   LINKER_OPTIONS+=( -optl-Wl,--allow-shlib-undefined )
 fi
@@ -41,7 +47,7 @@ ghc -lstdc++ \
   -optc-I"$EFFEKSEER_PREFIX/include" \
   -optc-I"$EFFEKSEER_PREFIX/include/Effekseer" \
   -optc-I/usr/include/freetype2 \
-  --make Main.hs EffekseerBridge.cpp EglBridge.cpp \
+  --make Main.hs EffekseerBridge.cpp EglBridge.cpp RayBackgroundBridge.cpp \
   -L"$EFFEKSEER_PREFIX/lib" -L"$EFFEKSEER_PREFIX/lib64" \
   "$GLEW_LIBRARY" -lEffekseer -lEffekseerRendererGL "$GLFW_LIBRARY" \
   -lfreetype -lpthread -lEffekseer -lEffekseerRendererGL \

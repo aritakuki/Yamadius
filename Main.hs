@@ -62,6 +62,8 @@ foreign import ccall "setEffekseerPlayerPosition" c_setEffeksserPlayerPosition :
 foreign import ccall "initEglRenderer" c_initEglRenderer :: CInt -> CInt -> IO CInt
 foreign import ccall "finishEglRenderer" c_finishEglRenderer :: IO ()
 foreign import ccall "presentMonadiusFrame" c_presentMonadiusFrame :: IO ()
+foreign import ccall "initRayBackground" c_initRayBackground :: IO CInt
+foreign import ccall "finishRayBackground" c_finishRayBackground :: IO ()
 
 presentFrame :: IO ()
 presentFrame = do
@@ -153,6 +155,9 @@ main = do
           initialHeight = 1040
       let setupScene = do
             c_initEffeksser 640 480
+            rayBackgroundReady <- c_initRayBackground
+            unless (rayBackgroundReady /= 0) $
+              hPutStrLn stderr "The live ray background could not be initialized; continuing without it."
             shieldTextures <- mapM loadTextureFromFile
               [ "Resources/force-field-frame-0.png"
               , "Resources/force-field-frame-1.png"
@@ -176,6 +181,7 @@ main = do
               loop
         loop
         c_finishEffeksser
+        c_finishRayBackground
         c_finishEglRenderer
        else do
         Size screenWidth screenHeight <- get screenSize
@@ -201,10 +207,14 @@ main = do
         addTimerCallback 16 (timerProc (dispProc externalInputFile keystate cp))
         initMatrix
         mainLoop
+        c_finishRayBackground
         destroyWindow curwnd
         c_finishEffeksser
 
-      `catch` (\(SomeException err) ->
+      `catch` (\(SomeException err) -> do
+        -- In particular, q/Escape exits by raising ExitSuccess.  Reap the
+        -- embedded Lisp worker while the OpenGL context is still current.
+        c_finishRayBackground
         hPutStrLn stderr ("Monadius terminated during initialisation: " ++ show err))
 
       where

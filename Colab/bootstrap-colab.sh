@@ -2,12 +2,16 @@
 # Rebuild a fresh Google Colab runtime and start Monadius on NVIDIA EGL.
 #
 # From an empty Colab runtime, run this file directly from GitHub:
-# curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/colab-interactive-monadius/Colab/bootstrap-colab.sh | bash
+# curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/live-raytraced-background/Colab/bootstrap-colab.sh | bash
 set -euo pipefail
 
 REPO_DIR="${MONADIUS_REPO_DIR:-/content/Yamadius-colab}"
-BRANCH="${MONADIUS_BRANCH:-feature/colab-interactive-monadius}"
+BRANCH="${MONADIUS_BRANCH:-feature/live-raytraced-background}"
 REPOSITORY_URL="${MONADIUS_REPOSITORY_URL:-https://github.com/aritakuki/Yamadius.git}"
+LISP_REPO_DIR="${MONADIUS_LISP_REPO_DIR:-/content/lisp-raytracer}"
+LISP_BRANCH="${MONADIUS_LISP_BRANCH:-feature/live-raytraced-background}"
+LISP_REPOSITORY_URL="${MONADIUS_LISP_REPOSITORY_URL:-https://github.com/aritakuki/lisp-raytracer.git}"
+RAY_RUNTIME_PREFIX="${MONADIUS_RAY_RUNTIME_PREFIX:-/content/monadius-ray-runtime}"
 EFFEKSEER_ARCHIVE="/content/EffekseerRuntime160e.zip"
 EFFEKSEER_SOURCE="/content/EffekseerRuntime160e"
 EFFEKSEER_PREFIX="/content/effekseer-install"
@@ -20,7 +24,7 @@ apt-get -qq install -y \
   freeglut3-dev libgl1-mesa-dev libegl1-mesa-dev libopengl-dev libglu1-mesa-dev \
   libalut-dev libfreetype6-dev libglew-dev libglfw3-dev libjpeg-dev \
   libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libxcursor-dev \
-  ghc cabal-install
+  ghc cabal-install sbcl libffi-dev
 
 if [[ -d "$REPO_DIR/.git" ]]; then
   git -C "$REPO_DIR" fetch origin "$BRANCH"
@@ -28,6 +32,14 @@ if [[ -d "$REPO_DIR/.git" ]]; then
   git -C "$REPO_DIR" pull --ff-only
 else
   git clone --branch "$BRANCH" "$REPOSITORY_URL" "$REPO_DIR"
+fi
+
+if [[ -d "$LISP_REPO_DIR/.git" ]]; then
+  git -C "$LISP_REPO_DIR" fetch origin "$LISP_BRANCH"
+  git -C "$LISP_REPO_DIR" switch "$LISP_BRANCH"
+  git -C "$LISP_REPO_DIR" pull --ff-only
+else
+  git clone --branch "$LISP_BRANCH" "$LISP_REPOSITORY_URL" "$LISP_REPO_DIR"
 fi
 
 cd "$REPO_DIR"
@@ -40,6 +52,7 @@ mkdir -p "$EFFEKSEER_SOURCE"
 unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
+bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 MONADIUS_COLAB_EGL=1 EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" bash build.sh
 bash Colab/fresh-start.sh
 

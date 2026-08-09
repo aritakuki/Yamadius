@@ -47,6 +47,7 @@ foreign import ccall "_Z16restartEffekseeri" c_restartEffeksser :: CInt -> IO ()
 foreign import ccall "setEffekseerPlayerPosition" c_setEffeksserPlayerPosition :: CFloat -> CFloat -> IO ()
 foreign import ccall "renderStageTwoCaption" c_renderStageTwoCaption :: CFloat -> CInt -> CInt -> IO ()
 foreign import ccall "renderStageThreeCaption" c_renderStageThreeCaption :: CInt -> CInt -> CInt -> IO ()
+foreign import ccall "renderRayBackground" c_renderRayBackground :: CInt -> CInt -> CInt -> CInt -> IO ()
 
 -- Remaining effect variants in the current seven-effect cycle.  This is
 -- deliberately separate from the game state so replay/save data stays in its
@@ -1470,6 +1471,11 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   -- Keep a 4:3 stage and add the HUD below it; both scale with the window.
   viewport $= (Position (fromIntegral stageX) (fromIntegral stageY),
                Size (fromIntegral stageWidth) (fromIntegral stageHeight))
+  -- The bridge uploads pixels only when Lisp publishes a new generation.  It
+  -- still draws the current texture after every color-buffer clear, so an
+  -- unfinished Lisp frame leaves the previous background unchanged.
+  c_renderRayBackground (fromIntegral stageX) (fromIntegral stageY)
+    (fromIntegral stageWidth) (fromIntegral stageHeight)
   -- Solid corridor panels form the backdrop.  Drawing them first prevents
   -- their faces from covering ships, shots, and the foreground UI.
   mapM_ renderGameObject $ filter isLandscape objects
