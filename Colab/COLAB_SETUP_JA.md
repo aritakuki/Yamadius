@@ -93,6 +93,7 @@ output.serve_kernel_port_as_iframe(8765, height=1100)
 !pkill -f '[b]ash /content/Yamadius-colab/Colab/run-colab.sh' || true
 !pkill -f '[p]ython3 /content/Yamadius-colab/Colab/monadius_colab_bridge.py' || true
 !pkill -x Main || true
+!pkill -f '[s]bcl.*run-shared-background.lsp' || true
 !pkill -f '[X]vfb :99' || true
 ```
 

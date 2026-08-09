@@ -55,12 +55,13 @@ used only in its own process; no custom SBCL runtime is compiled or loaded into
 !curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/shared-memory-ray-background/Colab/bootstrap-colab.sh | bash
 ```
 
-Embed the game from a Python cell:
+The bootstrap already started one game. Embed that existing game from a Python
+cell; do not run `fresh_start.py` immediately after bootstrap:
 
 ```python
 %cd /content/Yamadius-colab
-%env MONADIUS_PORT=8765
-%run Colab/fresh_start.py
+from google.colab import output
+output.serve_kernel_port_as_iframe(8765, height=1100)
 ```
 
 Click the game image once to give it keyboard focus and enable browser audio.
