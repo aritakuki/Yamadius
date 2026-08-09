@@ -35,7 +35,8 @@ print("既存環境あり" if repo.is_dir() else "初期状態（再セットア
 ColabでGPUランタイムを選択してから、次のシェルセルを一度だけ実行します。
 依存パッケージ、両リポジトリ、Lispを埋め込むSBCL共有ランタイム、Effekseer、
 Monadiusをすべて準備し、ポート8765で起動します。初回はSBCLもビルドするため、
-従来より時間がかかります。
+従来より時間がかかります。Colab同梱版とのバージョン差を避けるため、SBCLは
+公式2.5.9バイナリをブートストラップに使って同じ2.5.9をビルドします。
 
 ```bash
 !curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/live-raytraced-background/Colab/bootstrap-colab.sh | bash

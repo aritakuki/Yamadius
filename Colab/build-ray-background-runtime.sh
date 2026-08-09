@@ -11,6 +11,12 @@ LISP_ROOT="$(CDPATH= cd -- "$1" && pwd)"
 RUNTIME_PREFIX="${2:-/content/monadius-ray-runtime}"
 SBCL_TAG="${MONADIUS_SBCL_TAG:-sbcl-2.5.9}"
 SBCL_SOURCE="${MONADIUS_SBCL_SOURCE:-/content/$SBCL_TAG}"
+SBCL_VERSION="${SBCL_TAG#sbcl-}"
+SBCL_BOOTSTRAP_PARENT="${MONADIUS_SBCL_BOOTSTRAP_PARENT:-/content}"
+SBCL_BOOTSTRAP_DIR="$SBCL_BOOTSTRAP_PARENT/sbcl-$SBCL_VERSION-x86-64-linux"
+SBCL_BOOTSTRAP_ARCHIVE="${MONADIUS_SBCL_BOOTSTRAP_ARCHIVE:-$SBCL_BOOTSTRAP_PARENT/sbcl-$SBCL_VERSION-x86-64-linux-binary.tar.bz2}"
+SBCL_BOOTSTRAP_URL="${MONADIUS_SBCL_BOOTSTRAP_URL:-https://downloads.sourceforge.net/project/sbcl/sbcl/$SBCL_VERSION/sbcl-$SBCL_VERSION-x86-64-linux-binary.tar.bz2}"
+SBCL_BOOTSTRAP_SHA256="${MONADIUS_SBCL_BOOTSTRAP_SHA256:-8c33eae3f097b03942d6fc485001931ca75142d69e5902191cbdbf0c7d26ac16}"
 QUICKLISP_SETUP="${QUICKLISP_SETUP:-$HOME/quicklisp/setup.lisp}"
 LISP_CACHE="${MONADIUS_LISP_CACHE:-/content/monadius-common-lisp-cache}"
 CORE_FILE="$RUNTIME_PREFIX/lib/sbcl/monadius-ray-background.core"
@@ -42,9 +48,25 @@ if [[ ! -f "$RUNTIME_PREFIX/lib/libsbcl.so" ]]; then
     git clone --depth 1 --branch "$SBCL_TAG" \
       https://github.com/sbcl/sbcl.git "$SBCL_SOURCE"
   fi
+
+  # Colab's packaged SBCL can be newer than the pinned source and can turn a
+  # newly introduced compiler warning into a failed cross-compilation.  Use
+  # the official binary of the same version as a deterministic bootstrap host.
+  mkdir -p "$SBCL_BOOTSTRAP_PARENT"
+  if ! printf '%s  %s\n' "$SBCL_BOOTSTRAP_SHA256" "$SBCL_BOOTSTRAP_ARCHIVE" |
+       sha256sum --check --status; then
+    wget -q -O "$SBCL_BOOTSTRAP_ARCHIVE" "$SBCL_BOOTSTRAP_URL"
+  fi
+  printf '%s  %s\n' "$SBCL_BOOTSTRAP_SHA256" "$SBCL_BOOTSTRAP_ARCHIVE" |
+    sha256sum --check
+  if [[ ! -x "$SBCL_BOOTSTRAP_DIR/src/runtime/sbcl" ||
+        ! -s "$SBCL_BOOTSTRAP_DIR/output/sbcl.core" ]]; then
+    tar -xjf "$SBCL_BOOTSTRAP_ARCHIVE" -C "$SBCL_BOOTSTRAP_PARENT"
+  fi
+  SBCL_XC_HOST="sh $SBCL_BOOTSTRAP_DIR/run-sbcl.sh --noinform --disable-debugger --no-userinit --no-sysinit"
   (
     cd "$SBCL_SOURCE"
-    sh make.sh --prefix="$RUNTIME_PREFIX"
+    sh make.sh --prefix="$RUNTIME_PREFIX" --xc-host="$SBCL_XC_HOST"
     sh make-shared-library.sh
     sh install.sh
   )
