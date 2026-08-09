@@ -150,4 +150,5 @@ Lispは完成した画像だけを世代番号付き二重バッファへ公開�
 正常時は、`run-colab.sh`、`monadius_colab_bridge.py`、`Xvfb :99`、`./Main`が
 それぞれ一つずつ表示されます。最初の背景が完成してゲーム画面に取り込まれると、
 `game.log` に `Live CUDA background published frame 1` と
-`OpenGL accepted the first complete Lisp background` がこの順で記録されます。
+`OpenGL accepted the first complete Lisp background` が記録されます。Lispワーカーと
+ゲーム描画は並行しているため、この2行の記録順は前後することがあります。
