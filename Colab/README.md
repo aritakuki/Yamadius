@@ -44,10 +44,10 @@ is released automatically instead of remaining stuck.
 Select a GPU runtime, then run this shell cell once.  It installs dependencies,
 checks out `feature/live-raytraced-background` in both the Monadius and Lisp
 repositories, builds the callable SBCL runtime, Effekseer, and Monadius, and
-starts the local bridge.  The first build takes longer because SBCL is compiled
-once under `/content/monadius-ray-runtime`; its official matching-version
-binary is used as the bootstrap compiler so the Colab package version cannot
-change the build result:
+starts the local bridge.  The first build takes longer because SBCL 2.5.9 is
+compiled once under `/content/monadius-ray-runtime`; the official
+Colab-compatible SBCL 2.4.0 binary is used only as its deterministic bootstrap
+compiler:
 
 ```bash
 !curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/live-raytraced-background/Colab/bootstrap-colab.sh | bash
