@@ -19,6 +19,9 @@ Colab上の配置先はMonadiusが `/content/Yamadius-colab`、Lispが
   起動・再起動には `Colab/fresh_start.py` を使います。
 - セル内画面と「別ウィンドウで開く」で表示した画面は、一つのゲームを共有します。
   ただし、起動セルを複数回同時に実行すると、古いiframeが余分な通信を行う可能性があります。
+- Chromeのシークレットウィンドウでは、既定のサードパーティCookie制限により
+  Colabのポートproxyを使うiframeが表示されないことがあります。通常ウィンドウを
+  使用するか、Colabに対してサードパーティCookieを一時的に許可してください。
 
 ## 1. ランタイムが初期化されたか確認する
 
@@ -138,6 +141,11 @@ Lisp側が更新された場合は、Lisp用ブランチも取得し、別プロ
 !git -C /content/lisp-raytracer pull --ff-only
 !bash Colab/build-ray-background-runtime.sh /content/lisp-raytracer /content/monadius-ray-runtime
 ```
+
+実行時SBCLは、上のビルドで作ったCommon Lispキャッシュ
+`/content/monadius-common-lisp-cache`を再利用します。また、必要時にcl-cudaを
+再コンパイルできるよう、`run-colab.sh`がCUDAのヘッダー、ライブラリ、`nvcc`の
+検索パスをSBCLへ引き継ぎます。
 
 `Main`は匿名のRAM領域（Linux `memfd`）を作り、別プロセスのLispと共有します。
 画像ファイルは作りません。Lispは完成した画像だけを世代番号付き3バッファへ

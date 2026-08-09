@@ -18,12 +18,19 @@ VENDOR_FILE="$RUNTIME_DIR/nvidia-egl.json"
 BRIDGE_READY_FILE="$RUNTIME_DIR/bridge.ready"
 RAY_RUNTIME_PREFIX="${MONADIUS_RAY_RUNTIME_PREFIX:-/content/monadius-ray-runtime}"
 LISP_REPO_DIR="${MONADIUS_LISP_REPO_DIR:-/content/lisp-raytracer}"
+LISP_CACHE="${MONADIUS_LISP_CACHE:-/content/monadius-common-lisp-cache}"
 RAY_CUDA_CACHE="${MONADIUS_RAY_CUDA_CACHE:-$RUNTIME_DIR/ray-cuda-cache}"
 RAY_WIDTH="${MONADIUS_RAY_WIDTH:-800}"
 RAY_HEIGHT="${MONADIUS_RAY_HEIGHT:-600}"
+CUDA_ROOT="${CUDA_HOME:-/usr/local/cuda}"
 
-mkdir -p "$RUNTIME_DIR" "$RAY_CUDA_CACHE"
+mkdir -p "$RUNTIME_DIR" "$RAY_CUDA_CACHE" "$LISP_CACHE"
 rm -f "$FRAME_FILE" "$INPUT_FILE" "$STATUS_FILE" "$AUDIO_EVENT_FILE" "$BRIDGE_READY_FILE"
+
+if [[ ! -r "$CUDA_ROOT/include/cuda.h" ]]; then
+  echo "CUDA header not found: $CUDA_ROOT/include/cuda.h" >&2
+  exit 1
+fi
 
 cleanup() {
   for process_id in "${GAME_PID:-}" "${BRIDGE_PID:-}" "${XVFB_PID:-}"; do
@@ -101,7 +108,11 @@ bash "$ROOT_DIR/Colab/prepare-browser-audio.sh" "$ROOT_DIR" "$AUDIO_CACHE_DIR"
 
 cd "$ROOT_DIR"
 env \
-  LD_LIBRARY_PATH="/usr/lib64-nvidia:/usr/local/cuda/lib64:$RAY_RUNTIME_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  CPATH="$CUDA_ROOT/include${CPATH:+:$CPATH}" \
+  LIBRARY_PATH="$CUDA_ROOT/lib64${LIBRARY_PATH:+:$LIBRARY_PATH}" \
+  LD_LIBRARY_PATH="/usr/lib64-nvidia:$CUDA_ROOT/lib64:$RAY_RUNTIME_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  PATH="$CUDA_ROOT/bin:$PATH" \
+  XDG_CACHE_HOME="$LISP_CACHE" \
   __EGL_VENDOR_LIBRARY_FILENAMES="$VENDOR_FILE" \
   DISPLAY="$DISPLAY_NUMBER" \
   MONADIUS_EGL=1 \
