@@ -1,6 +1,6 @@
 # Monadius Colab 初期セットアップ・再接続手順
 
-対象ブランチは両リポジトリとも `feature/live-raytraced-background` です。
+対象ブランチは両リポジトリとも `feature/shared-memory-ray-background` です。
 Colab上の配置先はMonadiusが `/content/Yamadius-colab`、Lispが
 `/content/lisp-raytracer` です。
 
@@ -33,13 +33,12 @@ print("既存環境あり" if repo.is_dir() else "初期状態（再セットア
 ## 2. 完全セットアップ：`/content/Yamadius-colab` がない場合
 
 ColabでGPUランタイムを選択してから、次のシェルセルを一度だけ実行します。
-依存パッケージ、両リポジトリ、Lispを埋め込むSBCL共有ランタイム、Effekseer、
-Monadiusをすべて準備し、ポート8765で起動します。初回はSBCLもビルドするため、
-従来より時間がかかります。Colabで動作する公式SBCL 2.4.0バイナリを
-ブートストラップとしてのみ使い、埋め込み用SBCL 2.5.9をビルドします。
+依存パッケージ、両リポジトリ、cl-cudaと小さな共有メモリライブラリ、Effekseer、
+Monadiusをすべて準備し、ポート8765で起動します。SBCLはColabのパッケージ版を
+別プロセスとして使います。埋め込み用SBCLのコンパイルはありません。
 
 ```bash
-!curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/live-raytraced-background/Colab/bootstrap-colab.sh | bash
+!curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/shared-memory-ray-background/Colab/bootstrap-colab.sh | bash
 ```
 
 完了したら、次のPythonセルで画面を表示します。bootstrap処理がすでにゲームを
@@ -116,7 +115,7 @@ output.serve_kernel_port_as_iframe(8765, height=1100)
 !git pull --ff-only
 ```
 
-期待されるブランチは `feature/live-raytraced-background` です。HaskellまたはC++が
+期待されるブランチは `feature/shared-memory-ray-background` です。HaskellまたはC++が
 更新された場合は、続けてビルドします。ColabブリッジなどPythonファイルだけの
 更新なら、このビルドは不要です。
 
@@ -124,8 +123,8 @@ output.serve_kernel_port_as_iframe(8765, height=1100)
 !MONADIUS_COLAB_EGL=1 EFFEKSEER_PREFIX=/content/effekseer-install bash build.sh
 ```
 
-Lisp側が更新された場合は、Lisp用ブランチも取得し、同一プロセス呼び出し用の
-コアを作り直します。
+Lisp側が更新された場合は、Lisp用ブランチも取得し、別プロセスが使う小さな
+共有メモリライブラリを作り直します。
 
 ```bash
 !git -C /content/lisp-raytracer branch --show-current
@@ -133,23 +132,25 @@ Lisp側が更新された場合は、Lisp用ブランチも取得し、同一プ
 !bash Colab/build-ray-background-runtime.sh /content/lisp-raytracer /content/monadius-ray-runtime
 ```
 
-Lispは完成した画像だけを世代番号付き二重バッファへ公開します。Haskellは世代が
-変わった時だけテクスチャ内容を更新し、Lispが計算中なら直前の完成画像をそのまま
-使います。ゲーム側の更新や描画がLispの完了を待つことはありません。
+`Main`は匿名のRAM領域（Linux `memfd`）を作り、別プロセスのLispと共有します。
+画像ファイルは作りません。Lispは完成した画像だけを世代番号付き3バッファへ
+公開します。Haskellは世代が変わった時だけテクスチャ内容を更新し、Lispが計算中なら
+直前の完成画像をそのまま使います。OpenGL転送中のバッファはLispが上書きしません。
+ゲーム側の更新や描画がLispの完了を待つことはありません。
 
 その後、「既存環境のクリーン再起動」の `%run Colab/fresh_start.py` を実行します。
 
 ## 7. 起動状態の確認
 
 ```bash
-!ps -eo pid,ppid,etime,cmd | grep -E '[r]un-colab|[m]onadius_colab_bridge|[X]vfb|[.]\/Main'
+!ps -eo pid,ppid,etime,cmd | grep -E '[r]un-colab|[m]onadius_colab_bridge|[X]vfb|[.]\/Main|[s]bcl.*run-shared-background'
 !test -f /tmp/monadius-colab/runner.log && tail -30 /tmp/monadius-colab/runner.log
 !test -f /tmp/monadius-colab/bridge.log && tail -30 /tmp/monadius-colab/bridge.log
 !test -f /tmp/monadius-colab/game.log && tail -30 /tmp/monadius-colab/game.log
 ```
 
-正常時は、`run-colab.sh`、`monadius_colab_bridge.py`、`Xvfb :99`、`./Main`が
-それぞれ一つずつ表示されます。最初の背景が完成してゲーム画面に取り込まれると、
+正常時は、`run-colab.sh`、`monadius_colab_bridge.py`、`Xvfb :99`、`./Main`、
+`sbcl ... run-shared-background.lsp`がそれぞれ一つずつ表示されます。最初の背景が完成してゲーム画面に取り込まれると、
 `game.log` に `Live CUDA background published frame 1` と
-`OpenGL accepted the first complete Lisp background` が記録されます。Lispワーカーと
+`OpenGL accepted the first complete Lisp background` が記録されます。Lispプロセスと
 ゲーム描画は並行しているため、この2行の記録順は前後することがあります。

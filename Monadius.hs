@@ -1471,9 +1471,10 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   -- Keep a 4:3 stage and add the HUD below it; both scale with the window.
   viewport $= (Position (fromIntegral stageX) (fromIntegral stageY),
                Size (fromIntegral stageWidth) (fromIntegral stageHeight))
-  -- The bridge uploads pixels only when Lisp publishes a new generation.  It
+  -- The bridge uploads pixels only when Lisp publishes a new generation. It
   -- still draws the current texture after every color-buffer clear, so an
-  -- unfinished Lisp frame leaves the previous background unchanged.
+  -- unfinished Lisp frame leaves the previous background unchanged. Lisp and
+  -- Haskell share anonymous RAM but run in separate processes.
   c_renderRayBackground (fromIntegral stageX) (fromIntegral stageY)
     (fromIntegral stageWidth) (fromIntegral stageHeight)
   -- Solid corridor panels form the backdrop.  Drawing them first prevents

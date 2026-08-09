@@ -13,6 +13,16 @@ RUNNER_LOG="$RUNTIME_DIR/runner.log"
 mkdir -p "$RUNTIME_DIR"
 
 pkill -x Main 2>/dev/null || true
+# Older embedded-SBCL builds could replace Main's SIGTERM handler. Wait for a
+# normal exit first, then guarantee that no old game remains to alternate with
+# the new one. Standalone renderers are tied to Main by a parent-death signal.
+for _ in $(seq 1 50); do
+  pgrep -x Main >/dev/null 2>&1 || break
+  sleep 0.1
+done
+if pgrep -x Main >/dev/null 2>&1; then
+  pkill -KILL -x Main 2>/dev/null || true
+fi
 pkill -f "^python3 $ROOT_DIR/Colab/monadius_colab_bridge.py" 2>/dev/null || true
 pkill -f "^Xvfb $DISPLAY_NUMBER" 2>/dev/null || true
 if command -v fuser >/dev/null 2>&1; then

@@ -9,7 +9,7 @@ outside that loop:
 
 ```text
 browser keys -> Colab bridge -> key file -> Haskell game loop
-Lisp/CUDA worker -> complete RGB frame -> in-process C++ double buffer + generation
+Lisp/CUDA process -> complete RGB frame -> anonymous shared-RAM triple buffer + generation
 Haskell frame -> new generation only: OpenGL texture upload -> draw current background
 Haskell/OpenGL -> NVIDIA EGL -> asynchronous PBO readback -> JPEG worker
 latest completed JPEG -> one continuous stream -> browser latest-frame slot -> Canvas
@@ -24,12 +24,15 @@ When display cannot keep up, intermediate captures are skipped instead of
 forming a browser-side frame queue.  Game updates and GPU rendering continue at
 their normal 16 ms cadence.
 
-The raytracer runs as an SBCL worker inside the `Main` process.  It owns its
-CUDA context and renders continuously without being called by the game loop.
-Haskell never waits for a raytraced frame.  When Lisp has not published a new
-generation, the OpenGL upload is skipped and the previous complete texture is
-drawn again.  The textured quad itself is drawn after every color-buffer clear;
-otherwise the previous background would not survive into the next game frame.
+The raytracer runs as a separate SBCL process and owns its CUDA context. `Main`
+creates an anonymous Linux `memfd` (RAM, not an image file), maps it, and passes
+the inherited descriptor to SBCL. Both processes map the same three RGBA slots.
+Lisp publishes only a completely converted slot and increments its generation;
+Haskell never waits for a raytraced frame. When the generation is unchanged,
+the OpenGL upload is skipped and the previous complete texture is drawn again.
+The third slot and a short-lived reader claim prevent Lisp from overwriting the
+slot while OpenGL is consuming it. If `Main` is killed, Linux also kills its
+SBCL child so the CUDA renderer cannot remain orphaned.
 
 The browser receives a one-time Ogg/Opus cache instead of the very large PCM
 WAV files used by the native game, and audio Range responses are bounded so a
@@ -42,15 +45,14 @@ is released automatically instead of remaining stuck.
 ## Fresh Colab runtime
 
 Select a GPU runtime, then run this shell cell once.  It installs dependencies,
-checks out `feature/live-raytraced-background` in both the Monadius and Lisp
-repositories, builds the callable SBCL runtime, Effekseer, and Monadius, and
-starts the local bridge.  The first build takes longer because SBCL 2.5.9 is
-compiled once under `/content/monadius-ray-runtime`; the official
-Colab-compatible SBCL 2.4.0 binary is used only as its deterministic bootstrap
-compiler:
+checks out `feature/shared-memory-ray-background` in both the Monadius and Lisp
+repositories, prepares cl-cuda and the small shared-memory library, builds
+Effekseer and Monadius, and starts the local bridge. The packaged Colab SBCL is
+used only in its own process; no custom SBCL runtime is compiled or loaded into
+`Main`:
 
 ```bash
-!curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/live-raytraced-background/Colab/bootstrap-colab.sh | bash
+!curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/shared-memory-ray-background/Colab/bootstrap-colab.sh | bash
 ```
 
 Embed the game from a Python cell:
@@ -92,8 +94,8 @@ an old iframe response remaining in the notebook output:
 %run Colab/fresh_start.py
 ```
 
-Changes to the Lisp renderer require pulling its branch and rebuilding the
-callable core before restarting `Main`:
+Changes to the Lisp renderer or the shared-memory C library require pulling its
+branch and rebuilding the small producer library before restarting `Main`:
 
 ```bash
 !git -C /content/lisp-raytracer pull --ff-only
@@ -113,11 +115,13 @@ Fresh Starts in the same VM.
 `fresh_start.py` stops prior Monadius/bridge/Xvfb processes, waits for the new
 bridge to own the selected port, and embeds it.  Xvfb exists only to initialise
 freeglut's stroke-font data; it is not used for rendering or screen capture.
+The restart path escalates from SIGTERM to SIGKILL only if an older `Main`
+refuses to exit, which also prevents two game instances from alternating.
 
 ## GPU verification
 
 The runtime log should report NVIDIA through `Colab/egl_probe.cpp`, and
-`nvidia-smi` should list `./Main` as a graphics process.  The expected renderer
+`nvidia-smi` should list `./Main` for graphics and `sbcl` for CUDA compute. The expected renderer
 on the standard Colab GPU runtime is similar to:
 
 ```text

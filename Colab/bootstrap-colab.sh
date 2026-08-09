@@ -2,14 +2,14 @@
 # Rebuild a fresh Google Colab runtime and start Monadius on NVIDIA EGL.
 #
 # From an empty Colab runtime, run this file directly from GitHub:
-# curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/live-raytraced-background/Colab/bootstrap-colab.sh | bash
+# curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/shared-memory-ray-background/Colab/bootstrap-colab.sh | bash
 set -euo pipefail
 
 REPO_DIR="${MONADIUS_REPO_DIR:-/content/Yamadius-colab}"
-BRANCH="${MONADIUS_BRANCH:-feature/live-raytraced-background}"
+BRANCH="${MONADIUS_BRANCH:-feature/shared-memory-ray-background}"
 REPOSITORY_URL="${MONADIUS_REPOSITORY_URL:-https://github.com/aritakuki/Yamadius.git}"
 LISP_REPO_DIR="${MONADIUS_LISP_REPO_DIR:-/content/lisp-raytracer}"
-LISP_BRANCH="${MONADIUS_LISP_BRANCH:-feature/live-raytraced-background}"
+LISP_BRANCH="${MONADIUS_LISP_BRANCH:-feature/shared-memory-ray-background}"
 LISP_REPOSITORY_URL="${MONADIUS_LISP_REPOSITORY_URL:-https://github.com/aritakuki/lisp-raytracer.git}"
 RAY_RUNTIME_PREFIX="${MONADIUS_RAY_RUNTIME_PREFIX:-/content/monadius-ray-runtime}"
 EFFEKSEER_ARCHIVE="/content/EffekseerRuntime160e.zip"

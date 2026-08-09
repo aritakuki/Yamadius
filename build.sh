@@ -32,12 +32,6 @@ fi
 # executable resolves it through the NVIDIA GLVND driver at runtime; do not
 # reject that shared-library reference while linking the Haskell binary.
 LINKER_OPTIONS=()
-LINKER_OPTIONS+=(
-  -optl-Wl,--export-dynamic-symbol=monadius_lisp_ray_background_run
-  -optl-Wl,--export-dynamic-symbol=monadiusRayBackgroundShouldStop
-  -optl-Wl,--export-dynamic-symbol=monadiusPublishRayBackgroundRgb
-  -optl-Wl,--export-dynamic-symbol=monadiusReportRayBackgroundError
-)
 if [[ "${MONADIUS_COLAB_EGL:-}" == "1" ]]; then
   LINKER_OPTIONS+=( -optl-Wl,--allow-shlib-undefined )
 fi

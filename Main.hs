@@ -212,8 +212,8 @@ main = do
         c_finishEffeksser
 
       `catch` (\(SomeException err) -> do
-        -- In particular, q/Escape exits by raising ExitSuccess.  Reap the
-        -- embedded Lisp worker while the OpenGL context is still current.
+        -- In particular, q/Escape exits by raising ExitSuccess. Reap the
+        -- separate Lisp producer while the OpenGL context is still current.
         c_finishRayBackground
         hPutStrLn stderr ("Monadius terminated during initialisation: " ++ show err))
 
