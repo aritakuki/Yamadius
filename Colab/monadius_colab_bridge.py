@@ -24,8 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 FRAME_STREAM_INTERVAL_SECONDS = 1.0 / 30.0
 AUDIO_RANGE_CHUNK_BYTES = 256 * 1024
-MAX_EFFECT_EVENT_AGE_MILLISECONDS = 1000
-INPUT_LEASE_SECONDS = 1.0
+INPUT_LEASE_SECONDS = 3.0
 
 
 PAGE = """<!doctype html>
@@ -71,19 +70,51 @@ let inputInFlight = null;
 let inputFlushTimer = null;
 let audioOffset = -1;
 let audioUnlocked = false;
+let audioPollController = null;
+let statusPollController = null;
 const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
                ' ':'space', a:'a', A:'a', f:'f', F:'f', g:'g', G:'g'};
 function inputValue() {
   return [...held].join(' ');
 }
+function setResponsiveTimeout(callback, delay) {
+  const timers = [];
+  let finished = false;
+  const clearTimers = () => {
+    for (const timer of timers) {
+      try { timer.owner.clearTimeout(timer.identifier); } catch (_) {}
+    }
+  };
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    clearTimers();
+    callback();
+  };
+  const cancel = () => {
+    if (finished) return;
+    finished = true;
+    clearTimers();
+  };
+  const schedule = owner => {
+    try {
+      timers.push({owner, identifier:owner.setTimeout(finish, delay)});
+    } catch (_) {}
+  };
+  // The notebook iframe can throttle timers while the pop-out has focus.
+  // Keep an opener fallback so closing the pop-out cannot strand a retry.
+  schedule(window);
+  if (gameWindow !== null && !gameWindow.closed) schedule(gameWindow);
+  return {cancel};
+}
 function scheduleInputFlush(delay) {
-  if (inputFlushTimer !== null) clearTimeout(inputFlushTimer);
-  inputFlushTimer = setTimeout(() => {
+  if (inputFlushTimer !== null) inputFlushTimer.cancel();
+  inputFlushTimer = setResponsiveTimeout(() => {
     inputFlushTimer = null;
     flushInput();
   }, delay);
 }
-function send() {
+function send(preemptWaitingRequests = false) {
   const value = inputValue();
   const next = {sequence: ++inputSequence, value};
   pendingInput = next;
@@ -94,7 +125,14 @@ function send() {
   if (inputInFlight !== null && inputInFlight.value !== value) {
     inputInFlight.controller.abort();
   }
-  scheduleInputFlush(0);
+  if (preemptWaitingRequests) {
+    if (audioPollController !== null) audioPollController.abort();
+    if (statusPollController !== null) statusPollController.abort();
+  }
+
+  // Start the request synchronously.  A zero-delay timer created by the
+  // notebook iframe can be throttled while the pop-out window has focus.
+  flushInput();
 }
 async function flushInput() {
   if (inputInFlight !== null || pendingInput === null) return;
@@ -102,7 +140,7 @@ async function flushInput() {
   pendingInput = null;
   const controller = new AbortController();
   inputInFlight = {...snapshot, controller};
-  const timeout = setTimeout(() => controller.abort(), 1500);
+  const timeout = setTimeout(() => controller.abort(), 750);
   let retryDelay = 0;
   try {
     const query = new URLSearchParams({generation:String(inputGeneration),
@@ -140,7 +178,7 @@ function token(e) {
 function handleKeyDown(e) { const k = token(e); if (k) {
   clearTimeout(releases.get(k));
   if (!held.has(k)) {
-    held.add(k); pressedAt.set(k, performance.now()); send();
+    held.add(k); pressedAt.set(k, performance.now()); send(true);
   }
   e.preventDefault();
 }}
@@ -150,13 +188,13 @@ function handleKeyUp(e) { const k = token(e); if (k) {
   // Movement must stop at keyup.  Only very short action taps are extended
   // enough for Main's next 16 ms input poll to observe them.
   const delay = movementTokens.has(k) ? 0 : Math.max(0, 80 - heldFor);
-  const release = () => { held.delete(k); pressedAt.delete(k); send(); };
+  const release = () => { held.delete(k); pressedAt.delete(k); send(true); };
   if (delay === 0) release(); else releases.set(k, setTimeout(release, delay));
   e.preventDefault();
 }}
 function releaseAllKeys() {
   for (const timeout of releases.values()) clearTimeout(timeout);
-  releases.clear(); pressedAt.clear(); held.clear(); send();
+  releases.clear(); pressedAt.clear(); held.clear(); send(true);
 }
 function attachInput(targetWindow) {
   targetWindow.addEventListener('keydown', handleKeyDown);
@@ -170,7 +208,8 @@ let frameWaiter = null;
 let displayedFrames = 0;
 let droppedFrames = 0;
 let videoWindowStarted = performance.now();
-const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+const wait = milliseconds =>
+    new Promise(resolve => setResponsiveTimeout(resolve, milliseconds));
 const headerBreak = new Uint8Array([13, 10, 13, 10]);
 const headerDecoder = new TextDecoder('ascii');
 function findBytes(haystack, needle) {
@@ -302,39 +341,60 @@ function applyAudioEvent(event) {
   }
 }
 async function pollAudioEvents() {
-  let retryDelay = 0;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
-  try {
-    const response = await fetch('/audio-events?offset=' + audioOffset,
-                                 {cache:'no-store', signal:controller.signal});
-    if (!response.ok) throw new Error('audio event request failed');
-    const update = await response.json();
-    audioOffset = update.offset;
-    for (const event of update.events) applyAudioEvent(event);
-  } catch (_) {
-    audioState.textContent = 'audio: bridge unavailable';
-    retryDelay = controller.signal.aborted ? 50 : 250;
-  } finally {
-    clearTimeout(timeout);
+  while (true) {
+    if (inputInFlight !== null || pendingInput !== null) {
+      await wait(25);
+      continue;
+    }
+
+    let retryDelay = 0;
+    const controller = new AbortController();
+    audioPollController = controller;
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    try {
+      const response = await fetch('/audio-events?offset=' + audioOffset,
+                                   {cache:'no-store', signal:controller.signal});
+      if (!response.ok) throw new Error('audio event request failed');
+      const update = await response.json();
+      audioOffset = update.offset;
+      for (const event of update.events) applyAudioEvent(event);
+    } catch (_) {
+      if (!controller.signal.aborted) {
+        audioState.textContent = 'audio: bridge unavailable';
+        retryDelay = 250;
+      } else {
+        retryDelay = 25;
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (audioPollController === controller) audioPollController = null;
+    }
+    if (retryDelay > 0) await wait(retryDelay);
   }
-  setTimeout(pollAudioEvents, retryDelay);
 }
 async function pollStatus() {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1000);
-  const retryDelay = 500;
-  try {
-    const response = await fetch('/status?t=' + Date.now(),
-                                 {cache:'no-store', signal:controller.signal});
-    if (!response.ok) throw new Error('status request failed');
-    engine.textContent = 'engine: ' + await response.text();
-  } catch (_) {
-    if (!controller.signal.aborted) engine.textContent = 'engine: unavailable';
-  } finally {
-    clearTimeout(timeout);
+  while (true) {
+    if (inputInFlight !== null || pendingInput !== null) {
+      await wait(50);
+      continue;
+    }
+
+    const controller = new AbortController();
+    statusPollController = controller;
+    const timeout = setTimeout(() => controller.abort(), 1000);
+    try {
+      const response = await fetch('/status?t=' + Date.now(),
+                                   {cache:'no-store', signal:controller.signal});
+      if (!response.ok) throw new Error('status request failed');
+      engine.textContent = 'engine: ' + await response.text();
+    } catch (_) {
+      if (!controller.signal.aborted) engine.textContent = 'engine: unavailable';
+    } finally {
+      clearTimeout(timeout);
+      if (statusPollController === controller) statusPollController = null;
+    }
+    await wait(500);
   }
-  setTimeout(pollStatus, retryDelay);
 }
 function enableAudio() {
   audioUnlocked = true;
@@ -414,9 +474,10 @@ function openGameWindow() {
   frameContext = popupContext;
   attachInput(opened);
   // Chrome may throttle timers in the notebook tab while this pop-up is in
-  // front.  Schedule a second lease heartbeat on the active game window so a
-  // genuinely held direction cannot expire merely because the opener is hidden.
-  opened.setInterval(() => { if (held.size) send(); }, 250);
+  // front.  Schedule the lease heartbeat in the active game window.
+  opened.setInterval(() => {
+    if (gameWindow === opened && held.size) send(false);
+  }, 250);
   opened.addEventListener('beforeunload', () => closeGameWindowState(opened));
   popupScreen.addEventListener('click', () => { popupScreen.focus(); enableAudio(); });
   opened.document.getElementById('close-window').addEventListener('click', () => opened.close());
@@ -428,10 +489,13 @@ function openGameWindow() {
 }
 openWindowButton.addEventListener('click', openGameWindow);
 setInterval(syncGameWindowStatus, 250);
-// A retry protects a held direction from a transient proxy request failure;
-// coalescing guarantees that heartbeats never create an unbounded queue.
-setInterval(() => { if (held.size) send(); }, 250);
-send();
+// Only the window currently receiving input sends lease heartbeats.  Running
+// both the iframe and pop-out timers doubled input traffic and competed with
+// audio delivery for the same Colab proxy connections.
+setInterval(() => {
+  if ((gameWindow === null || gameWindow.closed) && held.size) send(false);
+}, 250);
+send(true);
 receiveFrameStream();
 displayLatestFrames();
 pollAudioEvents();
@@ -619,16 +683,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     current_bgm = None
             events = [["bgm", current_bgm[0], current_bgm[1]]] if current_bgm else []
         else:
-            now_milliseconds = int(time.time() * 1000)
+            # Delivery can be delayed by Colab's proxy even though the game
+            # emitted the event on time.  Never turn transport delay into a
+            # silently missing effect.
             events = [
                 [action, path, gain]
-                for action, path, gain, emitted_at in events
-                if not (
-                    action == "play"
-                    and emitted_at is not None
-                    and now_milliseconds - emitted_at
-                    > MAX_EFFECT_EVENT_AGE_MILLISECONDS
-                )
+                for action, path, gain, _emitted_at in events
             ]
 
         payload = json.dumps({"offset": next_offset, "events": events}).encode("utf-8")

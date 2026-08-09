@@ -1,5 +1,8 @@
 # Google Colab interactive run
 
+Japanese step-by-step setup, reconnection, and `pkill` instructions are in
+[`COLAB_SETUP_JA.md`](COLAB_SETUP_JA.md).
+
 The Colab adapter keeps Monadius' original Haskell game loop and renders every
 game frame with OpenGL on the NVIDIA EGL device.  Browser transport is kept
 outside that loop:
@@ -21,9 +24,11 @@ their normal 16 ms cadence.
 
 The browser receives a one-time Ogg/Opus cache instead of the very large PCM
 WAV files used by the native game, and audio Range responses are bounded so a
-BGM transfer cannot occupy every notebook-proxy connection.  Key input and
-effect-event polling remain independent; if key heartbeats stop reaching the
-bridge, a held direction is released automatically instead of remaining stuck.
+BGM transfer cannot occupy every notebook-proxy connection.  Input transitions
+temporarily preempt replaceable background polls so they cannot wait behind a
+full proxy connection pool; interrupted effect polling then resumes from its
+previous offset.  If key heartbeats stop reaching the bridge, a held direction
+is released automatically instead of remaining stuck.
 
 ## Fresh Colab runtime
 
