@@ -1532,6 +1532,69 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   isGauge PowerUpGauge{} = True
   isGauge _              = False
 
+  -- Character art keeps the hand-drawn, wobbling outlines, but now places
+  -- opaque color planes just behind them.  Keeping the fill at a slightly
+  -- lower Z value avoids depth fighting with the original line art.
+  opaqueColor :: Color3 GLdouble -> IO ()
+  opaqueColor (Color3 r g b) = color (Color4 r g b (1 :: GLdouble))
+
+  polygonCenter :: [(GLdouble,GLdouble)] -> (GLdouble,GLdouble)
+  polygonCenter [] = (0,0)
+  polygonCenter points =
+    let pointCount = fromIntegral $ length points
+    in (sum (map fst points) / pointCount, sum (map snd points) / pointCount)
+
+  renderFilledUgoPolygon :: GLdouble -> Color3 GLdouble -> GLdouble -> [(GLdouble,GLdouble)] -> IO ()
+  renderFilledUgoPolygon _ _ _ [] = return ()
+  renderFilledUgoPolygon z fillColor wobble points = preservingMatrix $ do
+    translate (Vector3 0 0 z)
+    opaqueColor fillColor
+    renderPrimitive TriangleFan $
+      ugoVertices2D 0 wobble (polygonCenter points : points ++ [head points])
+
+  renderFilledPolygon :: GLdouble -> Color3 GLdouble -> [(GLdouble,GLdouble)] -> IO ()
+  renderFilledPolygon z fillColor = renderFilledUgoPolygon z fillColor 0
+
+  renderFilledShape :: Color3 GLdouble -> Complex GLdouble -> Shape -> IO ()
+  renderFilledShape fillColor (x:+y) shape = case shape of
+    Rectangular{bottomLeft = (l:+b), topRight = (r:+t)} ->
+      renderFilledPolygon (-0.45) fillColor [(x+l,y+b),(x+l,y+t),(x+r,y+t),(x+r,y+b)]
+    Circular{center=cx:+cy, radius = r} -> preservingMatrix $ do
+      translate (Vector3 (cx+x) (cy+y) 0)
+      rotate (intToGLdouble gameclock*(45+pi)) (Vector3 0 0 (1 :: GLdouble))
+      scale r r (1 :: GLdouble)
+      renderFilledPolygon (-0.45) fillColor $
+        map (\t -> (cos(2/7*t*pi),sin(2/7*t*pi))) [0..6]
+    Shapes{children=children} -> mapM_ (renderFilledShape fillColor (x:+y)) children
+
+  enemyShellColor :: Bool -> Color3 GLdouble
+  enemyShellColor hasPowerUp
+    | hasPowerUp = Color3 0.96 0.30 0.56
+    | otherwise  = Color3 0.72 0.76 0.90
+
+  enemyHighlightColor :: Bool -> Color3 GLdouble
+  enemyHighlightColor hasPowerUp
+    | hasPowerUp = Color3 1.00 0.72 0.82
+    | otherwise  = Color3 0.95 0.97 1.00
+
+  enemyOutlineColor :: Bool -> Color3 GLdouble
+  enemyOutlineColor hasPowerUp
+    | hasPowerUp = Color3 0.52 0.08 0.30
+    | otherwise  = Color3 0.20 0.25 0.48
+
+  renderColoredStroke :: GLdouble -> Color3 GLdouble -> Color3 GLdouble -> [(GLdouble,GLdouble)] -> IO ()
+  renderColoredStroke _ _ _ [] = return ()
+  renderColoredStroke width outerColor innerColor points = do
+    lineWidth $= realToFrac (width + 2)
+    opaqueColor outerColor
+    preservingMatrix $ do
+      translate (Vector3 0 0 (-0.2 :: GLdouble))
+      renderPrimitive LineStrip $ vertices2D 0 points
+    lineWidth $= realToFrac width
+    opaqueColor innerColor
+    renderPrimitive LineStrip $ vertices2D 0 points
+    lineWidth $= 1
+
   -- returns an IO monad that can render the object.
   renderGameObject :: GameObject -> IO ()
   renderGameObject gauge@PowerUpGauge{} = preservingMatrix $ do
@@ -1585,12 +1648,40 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
 
   renderGameObject vic@VicViper{position = x:+y} = if stageEntranceFrames variables > 0 && (stageEntranceFrames variables `div` 4) `mod` 2 == 0 then return () else if hp vic<=0 then preservingMatrix $ do
       translate (Vector3 x y 0)
-      scale pishaMagnitudeX pishaMagnitudeY 0
+      scale pishaMagnitudeX pishaMagnitudeY (1 :: GLdouble)
+      let burst =
+            [(0,12),(8,8),(10,4),(20,0),(10,-4),(8,-8),
+             (0,-12),(-8,-8),(-10,-4),(-20,0),(-10,4),(-8,8)]
+      renderFilledUgoPolygon (-0.55) (Color3 0.82 0.08 0.03) 1 burst
+      renderFilledUgoPolygon (-0.30) (Color3 1.00 0.55 0.08) 0.5 $
+        map (\(px,py) -> (px*0.55,py*0.55)) burst
       renderWithShade (Color3 (1.0 :: GLdouble) 0 0) (Color3 (1.0 :: GLdouble) 0.6 0.4) $ do
-        renderPrimitive LineLoop $ ugoVertices2DFreq 0 1 1
-          [(0,12),(8,8),(10,4),(20,0),(10,-4),(8,-8),(0,-12),(-8,-8),(-10,-4),(-20,0),(-10,4),(-8,8)]
+        renderPrimitive LineLoop $ ugoVertices2DFreq 0 1 1 burst
     else preservingMatrix $ do
       translate (Vector3 x y 0)
+      let shipSilhouette =
+            [(-14,-1),(-12,5),(-20,13),(-14,13),(2,5),(8,1),
+             (32,1),(32,-1),(24,-3),(18,-5),(4,-9),(-2,-9),(-10,-1)]
+          upperHull =
+            [(-14,-1),(-12,5),(-20,13),(-14,13),(2,5),(8,1),
+             (32,1),(32,-1),(14,-1)]
+          lowerHull = [(-10,-1),(14,-1),(18,-5),(4,-9),(-2,-9)]
+          upperWing = [(-18,11),(-14,12),(2,5),(8,1),(-1,3),(-12,7)]
+          cockpit = [(4,3),(6,5),(14,5),(22,1),(13,1),(8,2)]
+          bluePanel =
+            [(-14,-1),(-10,-1),(-2,-9),(-4,-9),(-10,-7),(-14,-3)]
+          engineFlare =
+            [(-36,1),(-28,5),(-24,5),(-20,1),(-20,-1),
+             (-24,-5),(-28,-5),(-36,-1)]
+      renderFilledUgoPolygon (-0.75) (Color3 0.33 0.36 0.48) 2 shipSilhouette
+      renderFilledUgoPolygon (-0.58) (Color3 0.93 0.94 0.90) 1 upperHull
+      renderFilledUgoPolygon (-0.55) (Color3 0.62 0.67 0.76) 1 lowerHull
+      renderFilledPolygon (-0.38) (Color3 0.88 0.66 0.43) upperWing
+      renderFilledPolygon (-0.24) (Color3 0.96 0.72 0.28) cockpit
+      renderFilledUgoPolygon (-0.24) (Color3 0.22 0.55 0.88) 1 bluePanel
+      renderFilledUgoPolygon (-0.55) (Color3 0.04 0.18 0.62) 3 engineFlare
+      renderFilledPolygon (-0.22) (Color3 0.28 0.85 1.00)
+        [(-34,1),(-29,3),(-24,3),(-21,0),(-24,-3),(-29,-3),(-34,-1)]
       renderWithShade (Color3 (1.0 :: GLdouble) 1.0 1.0) (Color3 (0.4 :: GLdouble) 0.4 0.6) $ do
         renderPrimitive LineStrip $ ugoVertices2D 0 2
           [((-14),(-1)),((-12),5),((-20),13),(-14,13),(2,5),(8,1),(32,1),(32,(-1)),(24,(-3)),(16,(-3))]
@@ -1615,10 +1706,16 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
 
   renderGameObject Option{position = x:+y} = preservingMatrix $ do
     translate (Vector3 x y 0)
+    let optionShell =
+          [(5,9),(9,7),(13,3),(13,-3),(9,-7),(5,-9),
+           (-5,-9),(-9,-7),(-13,-3),(-13,3),(-9,7),(-5,9)]
+    renderFilledUgoPolygon (-0.55) (Color3 0.88 0.24 0.56) 2 optionShell
+    renderFilledPolygon (-0.24) (Color3 1.00 0.68 0.22)
+      [(6,0),(3,5),(-3,5),(-6,0),(-3,-5),(3,-5)]
+    renderFilledPolygon (-0.12) (Color3 1.00 0.95 0.72)
+      [(3,0),(1.5,2.5),(-1.5,2.5),(-3,0),(-1.5,-2.5),(1.5,-2.5)]
     renderWithShade (Color3 (0.8 :: GLdouble) 0 0) (Color3 (0.4 :: GLdouble) 0 0) $
-      renderPrimitive LineLoop $ ugoVertices2D 0 2
-        [(5,9),(9,7),(13,3),(13,(-3)),(9,(-7)),(5,(-9)),
-         ((-5),(-9)),((-9),(-7)),((-13),(-3)),((-13),3),((-9),7),((-5),9)]
+      renderPrimitive LineLoop $ ugoVertices2D 0 2 optionShell
     renderWithShade (Color3 (1.0 :: GLdouble) 0.45 0) (Color3 (0.4 :: GLdouble) 0.2 0) $
       renderPrimitive LineStrip $ ugoVertices2D 0 1
         [((-12.0),(3.4)),(0.8,8.7),((-8.1),(-0.9)),(4.0,5.8),(4.3,5.6),
@@ -1628,6 +1725,8 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
     let dir = (phase v) :: GLdouble
     translate (Vector3 x y 0)
     rotate (dir / pi * 180) (Vector3 0 0 (1 :: GLdouble))
+    renderFilledPolygon (-0.55) (Color3 1.00 0.42 0.08) [(-6,1.5),(-17,0),(-6,-1.5)]
+    renderFilledUgoPolygon (-0.25) (Color3 0.96 0.88 0.64) 1 [(0,0),(-7,2),(-7,-2)]
     color (Color3 (1.0 :: GLdouble) 0.9 0.5)
     renderPrimitive LineLoop $ ugoVertices2D 0 1 [(0,0),(-7,2),(-7,-2)]
     renderPrimitive LineStrip $ ugoVertexFreq (-11) 0 0 1 1 >> ugoVertexFreq (-17) 0 0 7 1
@@ -1700,6 +1799,12 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   renderGameObject powerUpCapsule@PowerUpCapsule{} = preservingMatrix $ do
     let x:+y = position powerUpCapsule
     translate (Vector3 x y 0)
+    renderFilledUgoPolygon (-0.62) (Color3 0.76 0.80 0.92) 1
+      [(-16,-4),(-12,-10),(12,-10),(16,-4),(16,4),(12,10),(-12,10),(-16,4)]
+    renderFilledUgoPolygon (-0.38) (Color3 0.92 0.16 0.28) 0.5
+      [(-11,-5),(9,-5),(12,-3),(12,3),(9,5),(-11,5),(-13,3),(-13,-3)]
+    renderFilledPolygon (-0.18) (Color3 1.00 0.82 0.28)
+      [(5,0),(2,2),(-1,5),(-2,1),(-6,0),(-2,-1),(-1,-5),(2,-2)]
     renderWithShade (Color3 (0.9 :: GLdouble) 0.9 0.9) (Color3 (0.4 :: GLdouble) 0.4 0.4) $ do
       futa >> neji >> toge
       rotate (180) (Vector3 1 0 (0 :: GLdouble)) >> toge
@@ -1719,6 +1824,9 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
   renderGameObject DiamondBomb{position = (x:+y),age=clock} = preservingMatrix $ do
     translate (Vector3 x y 0)
     rotate (90*intToGLdouble(clock`mod`4)) (Vector3 0 0 (1 :: GLdouble))
+    renderFilledPolygon (-0.50) (Color3 0.78 0.06 0.16) [b,c,d,e]
+    renderFilledPolygon (-0.22) (Color3 1.00 0.62 0.10)
+      [(r*0.65,0),(0,r*0.65),(-r*0.65,0),(0,-r*0.65)]
     color (Color3 (1 :: GLdouble) 1 1)
     renderPrimitive LineLoop $ vertices2D 0 $ [a,b,c]
     color (Color3 (0.5 :: GLdouble) 0.5 0.5)
@@ -1734,33 +1842,54 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
       --    e
   renderGameObject TurnGear{position=x:+y,age=clock} = preservingMatrix $ do
     translate (Vector3 x y 0)
-    color (Color3 1.0 0.7 1.0 :: Color3 GLdouble)
     rotate (5 * intToGLdouble clock) (Vector3 0 0 1 :: Vector3 GLdouble)
     renderWing
     rotate 120 (Vector3 0 0 1 :: Vector3 GLdouble)
     renderWing
     rotate 120 (Vector3 0 0 1 :: Vector3 GLdouble)
     renderWing
+    let core = [(6,0),(3,5),(-3,5),(-6,0),(-3,-5),(3,-5)]
+    renderFilledPolygon (-0.18) (Color3 1.00 0.62 0.12) core
+    opaqueColor (Color3 1.00 0.92 0.62)
+    renderPrimitive LineLoop $ ugoVertices2D 0 0.5 core
     where
-      renderWing = renderPrimitive LineLoop $ ugoVertices2D 0 2 $ map ((\(t:+u) -> (t,u)) . (\(r,t) -> mkPolar r (pi*t)) )
-        [(3,0), (3,2/3), (smallBacterianSize,1/3), (smallBacterianSize,0), (smallBacterianSize+3,-1/3)]
+      renderWing = do
+        let wing = map ((\(t:+u) -> (t,u)) . (\(r,t) -> mkPolar r (pi*t)))
+              [(3,0), (3,2/3), (smallBacterianSize,1/3),
+               (smallBacterianSize,0), (smallBacterianSize+3,-1/3)]
+        renderFilledUgoPolygon (-0.50) (Color3 0.74 0.66 0.90) 2 wing
+        opaqueColor (Color3 0.96 0.90 1.00)
+        renderPrimitive LineLoop $ ugoVertices2D 0 2 wing
 
   renderGameObject Flyer{position=x:+y,age=_,velocity = v,hasItem=item}  = preservingMatrix $ do
     translate (Vector3 x y 0)
-    color (if item then (Color3 1.0 0.2 0.2 :: Color3 GLdouble) else (Color3 0.3 1.0 0.7 :: Color3 GLdouble))
     rotate (phase v / pi * 180) (Vector3 0 0 (1 :: GLdouble))
-    renderPrimitive LineLoop $ ugoVertices2D 0 2 $ [(-2,0),(-6,4),(-10,0),(-6,-4)]
-    renderPrimitive LineLoop $ ugoVertices2D 0 2 $ [(2,4),(16,4),(4,16),(-10,16)]
-    renderPrimitive LineLoop $ ugoVertices2D 0 2 $ [(2,-4),(16,-4),(4,-16),(-10,-16)]
-
+    let core = [(-2,0),(-6,4),(-10,0),(-6,-4)]
+        upperWing = [(2,4),(16,4),(4,16),(-10,16)]
+        lowerWing = [(2,-4),(16,-4),(4,-16),(-10,-16)]
+    renderFilledUgoPolygon (-0.58) (enemyShellColor item) 2 upperWing
+    renderFilledUgoPolygon (-0.58) (enemyShellColor item) 2 lowerWing
+    renderFilledUgoPolygon (-0.28) (Color3 1.00 0.66 0.12) 1 core
+    renderFilledPolygon (-0.16) (enemyHighlightColor item)
+      [(-3,0),(-6,2),(-8,0),(-6,-2)]
+    opaqueColor (enemyOutlineColor item)
+    renderPrimitive LineLoop $ ugoVertices2D 0 2 core
+    renderPrimitive LineLoop $ ugoVertices2D 0 2 upperWing
+    renderPrimitive LineLoop $ ugoVertices2D 0 2 lowerWing
   renderGameObject Ducker{position = (x:+y),hitDisp=hd,hasItem=item,velocity = v,gVelocity = g,age = a} = preservingMatrix $ do
     translate (Vector3 x y 0)
     if signum (imagPart g) > 0 then scale 1 (-1) (1 :: GLdouble) else return ()
     if signum (realPart v) < 0 then scale (-1) 1 (1 :: GLdouble) else return ()
     --after this, ducker is on the lower ground, looking right
-    color (if item then (Color3 1.0 0.2 0.2 :: Color3 GLdouble) else (Color3 0.3 1.0 0.7 :: Color3 GLdouble))
+    renderFilledShape (enemyShellColor item) (0:+0) hd
+    renderFilledUgoPolygon (-0.18) (enemyHighlightColor item) 0.5
+      [(-10,2),(-5,8),(6,8),(11,2),(7,-2),(-6,-2)]
+    renderFilledPolygon (-0.10) (Color3 1.00 0.66 0.12)
+      [(2,4),(7,4),(9,1),(7,-1),(2,-1)]
+    opaqueColor (enemyOutlineColor item)
     renderShape (0:+0) hd
-    renderPrimitive LineStrip $ vertices2D 0 [(0,0),(kx,ky),(fx,fy)]
+    renderColoredStroke 2 (enemyOutlineColor item) (Color3 0.93 0.64 0.24)
+      [(0,0),(kx,ky),(fx,fy)]
     where
       fx:+fy=foot $ intToGLdouble a/2
       kx:+ky=knee $ intToGLdouble a/2
@@ -1770,22 +1899,38 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
 
   renderGameObject Jumper{position = (x:+y),hitDisp=hd,hasItem=item,gravity = g,velocity=v} = preservingMatrix $ do
     translate (Vector3 x y 0)
-    color (if item then (Color3 1.0 0.2 0.2 :: Color3 GLdouble) else (Color3 0.3 1.0 0.7 :: Color3 GLdouble))
+    renderFilledShape (enemyShellColor item) (0:+0) hd
+    renderFilledUgoPolygon (-0.18) (enemyHighlightColor item) 0.5
+      [(-10,3),(-5,9),(5,9),(10,3),(6,-3),(-6,-3)]
+    renderFilledPolygon (-0.10) (Color3 1.00 0.64 0.10)
+      [(0,6),(5,2),(3,-3),(-3,-3),(-5,2)]
+    opaqueColor (enemyOutlineColor item)
     renderShape (0:+0) hd
     if gsign >0 then rotate 180 (Vector3 (1 :: GLdouble) 0 0) else return() -- after this you can assume that the object is not upside down
-    renderPrimitive LineStrip $ ugoVertices2D 0 2 $ [(15,-5),(25,-5+absvy*leg),(25,-25+absvy*leg)]
-    renderPrimitive LineStrip $ ugoVertices2D 0 2 $ [(-15,-5),(-25,-5+absvy*leg),(-25,-25+absvy*leg)]
+    renderColoredStroke 2 (enemyOutlineColor item) (Color3 0.80 0.86 0.96)
+      [(15,-5),(25,-5+absvy*leg),(25,-25+absvy*leg)]
+    renderColoredStroke 2 (enemyOutlineColor item) (Color3 0.80 0.86 0.96)
+      [(-15,-5),(-25,-5+absvy*leg),(-25,-25+absvy*leg)]
     where
       gsign = signum $ imagPart g
       absvy = imagPart v * gsign -- if falling (+) ascending (-)
       leg = 1.5
 
   renderGameObject Grashia{position = (x:+y),hitDisp=hd,hasItem=item,gunVector = nv,gravity = g,mode=m} = preservingMatrix $ do
-    color (if item then (Color3 1.0 0.2 0.2 :: Color3 GLdouble) else (Color3 0.3 1.0 0.7 :: Color3 GLdouble))
     translate (Vector3 x y 0)
+    renderFilledShape (enemyShellColor item) (0:+0) hd
+    renderFilledUgoPolygon (-0.18) (enemyHighlightColor item) 0.5
+      [(-11,4),(-6,10),(6,10),(11,4),(8,-4),(-8,-4)]
+    renderFilledPolygon (-0.10) (Color3 1.00 0.64 0.10)
+      [(5,0),(2,5),(-3,4),(-5,0),(-3,-4),(2,-5)]
+    opaqueColor (enemyOutlineColor item)
     renderShape (0:+0) hd
-    renderPrimitive LineLoop $ ugoVertices2D 0 2 $ map (\r -> (nvx*r,nvy*r)) [16,32]
+    renderColoredStroke 3 (enemyOutlineColor item) (Color3 0.48 0.88 0.96) $
+      map (\r -> (nvx*r,nvy*r)) [12,32]
     if m == 1 then do
+      renderFilledShape (enemyHighlightColor item) 0 $ Circular (16:+12*gsign) 4
+      renderFilledShape (enemyHighlightColor item) 0 $ Circular ((-16):+12*gsign) 4
+      opaqueColor (enemyOutlineColor item)
       renderShape 0 $ Circular (16:+12*gsign) 4
       renderShape 0 $ Circular ((-16):+12*gsign) 4
      else return ()
@@ -1795,20 +1940,34 @@ renderMonadius shieldTextures realKeys (Monadius (variables,objects)) = do
 
   renderGameObject me@ScrambleHatch{position = (x:+y),hitDisp=_,gravity= g,gateAngle = angl} = preservingMatrix $ do
     translate (Vector3 x y 0)
-    color (Color3 (1.2*(1-hpRate)) 0.5 (1.6*hpRate)  :: Color3 GLdouble)
     if gsign >0 then rotate 180 (Vector3 (1 :: GLdouble) 0 0) else return() -- after this you can assume that the object is not upside down
-    renderPrimitive LineLoop $ ugoVertices2DFreq 0 (angl*2) 1 $ [(-45,1),(-45,hatchHeight),(45,hatchHeight),(45,1)]
+    let hatchBody = [(-45,1),(-45,hatchHeight),(45,hatchHeight),(45,1)]
+    renderFilledUgoPolygon (-0.62) hatchShell (angl*2) hatchBody
+    renderFilledPolygon (-0.28) (Color3 0.48 0.82 0.90)
+      [(-28,7),(-28,hatchHeight-7),(28,hatchHeight-7),(28,7)]
+    renderFilledPolygon (-0.14) (Color3 0.96 0.70 0.20)
+      [(-18,12),(-18,17),(18,17),(18,12)]
+    opaqueColor hatchEdge
+    renderPrimitive LineLoop $ ugoVertices2DFreq 0 (angl*2) 1 hatchBody
     preservingMatrix $ do
       translate (Vector3 45 hatchHeight (0 :: GLdouble))
       rotate (-angl/pi*180) (Vector3 0 0 (1 :: GLdouble))
-      renderPrimitive LineLoop $ ugoVertices2DFreq 0 (angl*1) 2 $ [(0,0),(-45,0),(-45,10)]
+      let leftGate = [(0,0),(-45,0),(-45,10)]
+      renderFilledUgoPolygon (-0.54) hatchShell (angl*1) leftGate
+      opaqueColor hatchEdge
+      renderPrimitive LineLoop $ ugoVertices2DFreq 0 (angl*1) 2 leftGate
     preservingMatrix $ do
       translate (Vector3 (-45) hatchHeight (0 :: GLdouble))
       rotate (angl/pi*180) (Vector3 0 0 (1 :: GLdouble))
-      renderPrimitive LineLoop $ ugoVertices2DFreq 0 (angl*1) 2 $ [(0,0),(45,0),(45,10)]
+      let rightGate = [(0,0),(45,0),(45,10)]
+      renderFilledUgoPolygon (-0.54) hatchShell (angl*1) rightGate
+      opaqueColor hatchEdge
+      renderPrimitive LineLoop $ ugoVertices2DFreq 0 (angl*1) 2 rightGate
     where
       gsign = signum $ imagPart g
-      hpRate = (intToGLdouble $ hp me)/(intToGLdouble hatchHP)
+      hpRate = max 0 $ min 1 $ (intToGLdouble $ hp me)/(intToGLdouble hatchHP)
+      hatchShell = Color3 (0.16 + 0.55*(1-hpRate)) (0.32 + 0.12*hpRate) (0.46 + 0.30*hpRate)
+      hatchEdge = Color3 (0.62 + 0.32*(1-hpRate)) (0.88 - 0.48*(1-hpRate)) (0.96 - 0.34*(1-hpRate))
 
   renderGameObject LandScapeBlock{position=pos,hitDisp=hd} = preservingMatrix $ do
     -- Keep the collision shape unchanged, but render it as a constructed
