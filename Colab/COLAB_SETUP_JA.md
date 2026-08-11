@@ -1,12 +1,13 @@
 # Monadius Colab 初期セットアップ・再接続手順
 
-対象ブランチは両リポジトリとも `feature/shared-memory-ray-background` です。
+対象ブランチはMonadiusが `main`、Lisp側が
+`feature/shared-memory-ray-background` です。
 Colab上の配置先はMonadiusが `/content/Yamadius-colab`、Lispが
 `/content/lisp-raytracer` です。
 
 以前の同一プロセス版 `feature/live-raytraced-background` とは別ブランチです。
-完全セットアップでは自動的に新ブランチを取得します。既存のColab環境を更新する
-場合は、後述の手順で両リポジトリを明示的に新ブランチへ切り替えてください。
+完全セットアップでは各リポジトリの対象ブランチを自動的に取得します。既存の
+Colab環境を更新する場合は、後述の手順でそれぞれの対象ブランチへ切り替えてください。
 
 ## 最初に知っておくこと
 
@@ -45,7 +46,7 @@ Monadiusをすべて準備し、ポート8765で起動します。SBCLはColab�
 別プロセスとして使います。埋め込み用SBCLのコンパイルはありません。
 
 ```bash
-!curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/feature/shared-memory-ray-background/Colab/bootstrap-colab.sh | bash
+!curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/main/Colab/bootstrap-colab.sh | bash
 ```
 
 完了したら、次のPythonセルで画面を表示します。bootstrap処理がすでにゲームを
@@ -119,12 +120,12 @@ output.serve_kernel_port_as_iframe(8765, height=1100)
 
 ```python
 %cd /content/Yamadius-colab
-!git fetch origin feature/shared-memory-ray-background
-!git switch feature/shared-memory-ray-background
+!git fetch origin main
+!git switch main
 !git pull --ff-only
 ```
 
-`git switch` 後に表示されるブランチは `feature/shared-memory-ray-background` です。
+`git switch` 後に表示されるブランチは `main` です。
 HaskellまたはC++が更新された場合は、続けてビルドします。Colabブリッジなど
 Pythonファイルだけの更新なら、このビルドは不要です。
 
