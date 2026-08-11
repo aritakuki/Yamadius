@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Monadius on Colab — システム構成図</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --panel: #ffffff;
+      --line: #111111;
+      --text: #111111;
+      --muted: #444444;
+      --ink: #111111;
+      --soft-ink: #555555;
+      --paper-soft: #fafafa;
+      --shadow: none;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      background: var(--bg);
+      font-family: Inter, "Noto Sans JP", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", sans-serif;
+      line-height: 1.65;
+    }
+
+    body::before {
+      display: none;
+    }
+
+    .page {
+      width: min(2520px, calc(100% - 34px));
+      margin: 0 auto;
+      padding: 36px 0 54px;
+    }
+
+    .hero,
+    .diagram-card {
+      border: 1.5px solid var(--line);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border-radius: 28px;
+      padding: 34px 40px;
+    }
+
+    .hero::after {
+      content: "COLAB";
+      position: absolute;
+      right: -18px;
+      bottom: -76px;
+      color: rgba(0, 0, 0, 0.035);
+      font-size: 11rem;
+      font-weight: 900;
+      letter-spacing: -0.08em;
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--ink);
+      font-size: 0.76rem;
+      font-weight: 900;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 1100px;
+      margin: 0;
+      font-size: clamp(2rem, 3.4vw, 3.7rem);
+      line-height: 1.15;
+      letter-spacing: -0.04em;
+    }
+
+    .lead {
+      max-width: 1080px;
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    .diagram-card {
+      margin-top: 22px;
+      border-radius: 28px;
+      padding: 28px;
+    }
+
+    .diagram-heading {
+      margin-bottom: 18px;
+    }
+
+    .diagram-heading h2 {
+      margin: 0;
+      font-size: 1.5rem;
+      letter-spacing: -0.025em;
+    }
+
+    .diagram-heading p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .diagram-key {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 18px;
+      margin-bottom: 14px;
+      border: 1px solid var(--ink);
+      border-radius: 18px;
+      padding: 12px 14px;
+      background: #fff;
+    }
+
+    .key-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .key-title {
+      margin-right: 2px;
+      color: var(--soft-ink);
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+    }
+
+    .key-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid #777;
+      border-radius: 999px;
+      padding: 5px 9px;
+      color: var(--ink);
+      background: #fff;
+      font-size: 18px;
+      font-weight: 780;
+      white-space: nowrap;
+    }
+
+    .key-item::before {
+      content: "";
+      width: 24px;
+      height: 0;
+      border-top: 2px solid var(--ink);
+    }
+
+    .key-item.input::before { border-top-style: dotted; }
+    .key-item.control::before { border-top-style: dashed; }
+    .key-item.ray::before { border-top-width: 4px; }
+    .key-item.command::before { border-top-style: dashed; border-top-width: 1px; }
+    .key-item.result::before { border-top-width: 3px; }
+    .key-item.video::before {
+      height: 2px;
+      border: 0;
+      background: repeating-linear-gradient(
+        90deg,
+        var(--ink) 0 17px,
+        transparent 17px 22px
+      );
+    }
+    .key-item.audio::before {
+      height: 2px;
+      border: 0;
+      background: repeating-linear-gradient(
+        90deg,
+        var(--ink) 0 8px,
+        transparent 8px 12px,
+        var(--ink) 12px 14px,
+        transparent 14px 19px
+      );
+    }
+    .key-item.status::before { border-top-style: dotted; border-top-width: 2px; }
+
+    .key-separator {
+      width: 1px;
+      align-self: stretch;
+      background: #999;
+    }
+
+    .diagram-scroll {
+      overflow-x: auto;
+      border: 1px solid var(--ink);
+      border-radius: 22px;
+      background: #fff;
+    }
+
+    .architecture {
+      display: block;
+      width: max(100%, 2460px);
+      min-width: 2460px;
+      height: auto;
+    }
+
+    .architecture .zone {
+      fill: #fff;
+      stroke: var(--ink);
+      stroke-width: 2;
+      stroke-dasharray: 12 8;
+    }
+
+    .architecture .zone-title {
+      fill: var(--ink);
+      font-size: 25px;
+      font-weight: 850;
+      letter-spacing: 0.04em;
+    }
+
+    .architecture .node-frame {
+      fill: #fff;
+      stroke: var(--ink);
+      stroke-width: 1.7;
+    }
+
+    .architecture .gpu-frame {
+      fill: #fff;
+      stroke: var(--ink);
+      stroke-width: 2;
+      stroke-dasharray: 16 6 3 6;
+    }
+
+    .architecture .sync-frame {
+      fill: #fff;
+      stroke: var(--ink);
+      stroke-width: 1.5;
+      stroke-dasharray: 6 5;
+    }
+
+    .svg-node {
+      --node-color: var(--ink);
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      color: var(--ink);
+      font-family: Inter, "Noto Sans JP", "Yu Gothic UI", sans-serif;
+      text-align: center;
+    }
+
+    .svg-node strong {
+      color: var(--ink);
+      font-size: 26px;
+      line-height: 1.25;
+    }
+
+    .svg-node .role {
+      margin-top: 3px;
+      color: #222;
+      font-size: 18px;
+      font-weight: 750;
+    }
+
+    .svg-node .details {
+      margin: 10px 0 0;
+      color: #333;
+      font-size: 18px;
+      line-height: 1.46;
+    }
+
+    .trigger-list {
+      display: grid;
+      width: 100%;
+      gap: 5px;
+      margin-top: 12px;
+    }
+
+    .trigger {
+      border: 1px solid var(--ink);
+      border-radius: 9px;
+      padding: 5px 7px;
+      color: var(--ink);
+      background: #fff;
+      font-size: 18px;
+      font-weight: 800;
+      line-height: 1.3;
+    }
+
+    .trigger.event { border-style: dotted; border-width: 2px; }
+    .trigger.complete { border-style: dashed; }
+    .trigger.paced { border-style: double; border-width: 3px; }
+    .trigger.independent { border-style: dashed; border-width: 2px; }
+    .trigger.command { border-style: dashed; }
+
+    .human-node,
+    .browser-node,
+    .bridge-node,
+    .haskell-node,
+    .lisp-node,
+    .memory-node,
+    .gpu-node { --node-color: var(--ink); }
+
+    .component-list {
+      display: grid;
+      width: 100%;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .component {
+      border: 1px dashed var(--ink);
+      border-radius: 8px;
+      padding: 5px 8px;
+      color: #222;
+      background: #fff;
+      font-size: 18px;
+      line-height: 1.32;
+    }
+
+    .component b {
+      color: var(--ink);
+      font-weight: 900;
+    }
+
+    .svg-node.compact {
+      padding: 10px 15px;
+    }
+
+    .svg-node.compact strong {
+      font-size: 23px;
+    }
+
+    .svg-node.compact .details {
+      margin-top: 6px;
+      font-size: 18px;
+      line-height: 1.4;
+    }
+
+    .svg-node.compact .trigger-list {
+      margin-top: 7px;
+    }
+
+    .svg-node.compact .trigger {
+      padding: 3px 6px;
+      font-size: 18px;
+    }
+
+    .sync-note {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 20px;
+      color: #222;
+      font-family: Inter, "Noto Sans JP", "Yu Gothic UI", sans-serif;
+      font-size: 18px;
+      line-height: 1.45;
+      text-align: center;
+    }
+
+    .sync-note b {
+      color: var(--ink);
+      text-decoration: underline;
+    }
+
+    .architecture .route {
+      fill: none;
+      stroke: var(--ink);
+      stroke-width: 3.4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .architecture .input-route { stroke-dasharray: 2 7; }
+    .architecture .control-route { stroke-dasharray: 10 7; }
+    .architecture .ray-route { stroke-width: 4.5; }
+    .architecture .frame-route { stroke-dasharray: 18 5; }
+    .architecture .audio-route { stroke-dasharray: 12 5 2 5; }
+    .architecture .gl-route { stroke-width: 2.4; stroke-dasharray: 6 5; }
+    .architecture .result-route { stroke-width: 3.4; }
+    .architecture .status-route { stroke-width: 2.5; stroke-dasharray: 2 6; }
+    .architecture .lifecycle-route { stroke-width: 2.4; stroke-dasharray: 12 6 2 6; }
+
+    .architecture .edge-label {
+      paint-order: stroke;
+      stroke: #fff;
+      stroke-width: 7px;
+      stroke-linejoin: round;
+      font-size: 18px;
+      font-weight: 850;
+      text-anchor: middle;
+    }
+
+    .architecture .input-label,
+    .architecture .control-label,
+    .architecture .ray-label,
+    .architecture .frame-label,
+    .architecture .audio-label,
+    .architecture .gl-label,
+    .architecture .status-label,
+    .architecture .result-label,
+    .architecture .lifecycle-label { fill: var(--ink); }
+
+    .architecture .boundary-title {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: 850;
+      letter-spacing: 0.04em;
+    }
+
+    .source-note {
+      margin: 14px 3px 0;
+      color: #555;
+      font-size: 0.7rem;
+      text-align: right;
+    }
+
+    .source-note code {
+      color: #333;
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    @media (max-width: 760px) {
+      .page { width: calc(100% - 18px); padding-top: 12px; }
+      .hero { padding: 27px 22px; border-radius: 22px; }
+      .diagram-card { padding: 19px 12px; border-radius: 22px; }
+      .key-separator { display: none; }
+      .diagram-key { align-items: flex-start; }
+      .key-group { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="diagram-card" aria-labelledby="architecture-heading">
+      <div class="diagram-heading">
+        <h2 id="architecture-heading">Yamadius with Ray Tracer システム構成図</h2>
+        <p>Mainプロセス内のHaskellとC++、別プロセスのLisp、同じNVIDIA GPU上のOpenGLとCUDA、Colab経由のブラウザ表示を、実際のデータ経路に沿って示します。</p>
+      </div>
+
+      <div class="diagram-key" aria-label="構成図の凡例">
+        <div class="key-group routes">
+          <span class="key-title">線の種類</span>
+          <span class="key-item input">操作入力</span>
+          <span class="key-item control">stage・起動制御</span>
+          <span class="key-item ray">完成RGBA背景</span>
+          <span class="key-item command">GPU命令</span>
+          <span class="key-item result">GPU計算結果</span>
+          <span class="key-item video">ゲーム映像</span>
+          <span class="key-item audio">音声</span>
+          <span class="key-item status">状態表示</span>
+        </div>
+      </div>
+
+      <div class="diagram-scroll">
+        <svg class="architecture" viewBox="0 0 2640 1240" role="img" aria-labelledby="architecture-title architecture-desc">
+          <title id="architecture-title">Monadius Colab版の正確なシステム構成と動作タイミング</title>
+          <desc id="architecture-desc">プレイヤー、ブラウザ、Colabポートプロキシ、Python HTTPブリッジ、HaskellとC++からなるMainプロセス、Linux共有ホストメモリ、SBCL Lispプロセス、Colab割り当てNVIDIA GPUの間を流れる入力、状態、音声、映像、stage、CUDA計算結果、RGBA背景画像を示す。</desc>
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#111111"/>
+            </marker>
+          </defs>
+
+          <rect class="zone" x="730" y="30" width="1880" height="1175" rx="28"/>
+          <text class="zone-title" x="765" y="70">GOOGLE COLAB VM</text>
+          <text class="boundary-title" x="740" y="790" text-anchor="middle"><tspan x="740">COLAB PORT</tspan><tspan x="740" dy="20">PROXY / HTTP</tspan></text>
+
+          <rect class="node-frame" x="20" y="230" width="220" height="550" rx="24"/>
+          <foreignObject x="20" y="230" width="220" height="550">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node human-node" style="padding:12px">
+              <strong>プレイヤー</strong>
+              <span class="role">操作・視聴・聴取</span>
+              <p class="details">キーで自機を操作<br/>Canvasでゲームを見る<br/>BGM・効果音を聴く</p>
+              <div class="trigger-list">
+                <span class="trigger event">人の操作・クリックがきっかけ</span>
+              </div>
+            </div>
+          </foreignObject>
+
+          <rect class="node-frame" x="320" y="120" width="340" height="720" rx="24"/>
+          <foreignObject x="320" y="120" width="340" height="720">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node browser-node">
+              <strong>ブラウザ</strong>
+              <span class="role">JavaScript・Canvas・HTML Audio</span>
+              <p class="details">Colabプロキシ経由でHTTP通信<br/>受信した最新JPEGをCanvasへ描画<br/>音声イベントに従って音源を再生</p>
+              <div class="trigger-list">
+                <span class="trigger event">入力：keydown / keyup時</span>
+                <span class="trigger paced">キー保持中：250 msごとに再送</span>
+                <span class="trigger paced">状態：500 msごとにHTTP要求</span>
+                <span class="trigger complete">Canvas：JPEG到着ごと・最新優先</span>
+                <span class="trigger independent">音声：初回クリックで許可／以後イベント＋メディア時間</span>
+              </div>
+            </div>
+          </foreignObject>
+
+          <rect class="node-frame" x="820" y="120" width="350" height="720" rx="24"/>
+          <foreignObject x="820" y="120" width="350" height="720">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node bridge-node">
+              <strong>Pythonブリッジ</strong>
+              <span class="role">Colab内のHTTPサーバー</span>
+              <p class="details">/keysをkeysファイルへ反映<br/>frame.jpgをMJPEGとして配信<br/>status・audio-events・音源を配信</p>
+              <div class="trigger-list">
+                <span class="trigger event">基本動作：HTTP要求を受けた時</span>
+                <span class="trigger paced">映像：新JPEGのみ・最大30 fps</span>
+                <span class="trigger complete">音声イベント：最大2秒のlong poll</span>
+                <span class="trigger paced">入力監視：50 ms／3秒無通信で解除</span>
+              </div>
+            </div>
+          </foreignObject>
+
+          <rect class="node-frame" x="1330" y="130" width="440" height="620" rx="24"/>
+          <foreignObject x="1330" y="130" width="440" height="620">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node haskell-node" style="padding:13px">
+              <strong>Mainプロセス</strong>
+              <span class="role">Haskell + リンクされたC++</span>
+              <div class="component-list">
+                <div class="component"><b>Haskell</b><br/>入力・自機・敵・弾・衝突・stageを1ステップ更新。描画命令、audio-events、statusを発行</div>
+                <div class="component"><b>RayBackgroundBridge.cpp</b><br/>memfd作成、SBCL起動・終了、新generation確認、RGBA8をOpenGL textureへ転送</div>
+                <div class="component"><b>EglBridge.cpp / EffekseerBridge.cpp</b><br/>EGL、非同期PBO読出し、CPU上のlibjpeg処理、エフェクト描画</div>
+              </div>
+              <div class="trigger-list">
+                <span class="trigger">ゲーム処理・描画 → 16 ms休止 → 次へ</span>
+                <span class="trigger">1反復＝ゲーム世界を1ステップ更新</span>
+              </div>
+            </div>
+          </foreignObject>
+
+          <rect class="node-frame" x="1900" y="130" width="280" height="620" rx="22"/>
+          <foreignObject x="1900" y="130" width="280" height="620">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node memory-node" style="padding:12px">
+              <strong>Linux共有メモリ</strong>
+              <span class="role">memfd・CPUホストRAM</span>
+              <p class="details">header：stage・generation・front・reader<br/>RGBA8：3バッファ（既定800×600）</p>
+              <div class="trigger-list">
+                <span class="trigger independent">自分では動かない受動的な受渡し領域</span>
+                <span class="trigger event">stage：値が変わった時だけMainが書換え</span>
+                <span class="trigger complete">RGBA：C共有ライブラリが1枚完成時に公開</span>
+                <span class="trigger">Mainが描画ごとに新generationを確認</span>
+              </div>
+            </div>
+          </foreignObject>
+
+          <rect class="node-frame" x="2310" y="130" width="300" height="620" rx="24"/>
+          <foreignObject x="2310" y="130" width="300" height="620">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node lisp-node" style="padding:12px">
+              <strong>SBCLプロセス</strong>
+              <span class="role">Common Lisp + C helper</span>
+              <div class="component-list">
+                <div class="component"><b>Common Lisp / cl-cuda</b><br/>カメラ・球・材質を更新し、stageを読み、CUDA kernelを起動</div>
+                <div class="component"><b>Lisp側ホストメモリ</b><br/>CUDAデバイスからfloat RGBをdevice-to-host転送</div>
+                <div class="component"><b>monadius-shared-memory.c</b><br/>float RGBをRGBA8へ変換し、完成後に共有メモリへ公開</div>
+              </div>
+              <div class="trigger-list">
+                <span class="trigger complete">固定周期なし：1枚完成後すぐ次へ</span>
+                <span class="trigger complete">frame / 60は座標計算であり時計ではない</span>
+              </div>
+            </div>
+          </foreignObject>
+
+          <rect class="gpu-frame" x="1290" y="850" width="1320" height="245" rx="25"/>
+          <text class="zone-title" x="1325" y="888">COLAB割り当てNVIDIA GPU（機種はランタイム依存）</text>
+
+          <rect class="node-frame" x="1340" y="915" width="500" height="140" rx="18"/>
+          <foreignObject x="1340" y="915" width="500" height="140">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node gpu-node compact">
+              <strong>OpenGL描画処理</strong>
+              <p class="details">レイトレ背景texture＋地形＋キャラクター＋HUD＋Effekseer＋字幕をEGL pbufferへ合成</p>
+              <div class="trigger-list"><span class="trigger command">Mainのゲーム反復ごとに命令を受ける</span></div>
+            </div>
+          </foreignObject>
+
+          <rect class="node-frame" x="2070" y="915" width="490" height="140" rx="18"/>
+          <foreignObject x="2070" y="915" width="490" height="140">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node gpu-node compact">
+              <strong>CUDA raytrace kernel</strong>
+              <p class="details">各pixelのray・交差・陰影・影・反射・屈折・空色を並列計算し、float RGBを出力</p>
+              <div class="trigger-list"><span class="trigger command">Lispが背景1枚ごとに起動</span></div>
+            </div>
+          </foreignObject>
+
+          <rect class="sync-frame" x="1290" y="1125" width="1320" height="60" rx="17"/>
+          <foreignObject x="1290" y="1125" width="1320" height="60">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="sync-note">
+              <span><b>共通の1本の時計はありません。</b> Mainは処理時間＋16 ms休止、Lispは1枚完成駆動、Python映像は新JPEGを最大30 fps、ブラウザ描画と音声は到着イベントで進みます。</span>
+            </div>
+          </foreignObject>
+
+          <!-- Main creates and controls the separate SBCL producer process. -->
+          <path class="route lifecycle-route" d="M1690 130 V98 H2460 V130" marker-end="url(#arrow)"/>
+          <text class="edge-label lifecycle-label" x="2075" y="88">RayBackgroundBridgeがSBCLを別プロセスとして起動・終了管理</text>
+
+          <!-- Input lane: human -> browser -> Python -> keys file -> Main. -->
+          <path class="route input-route" d="M240 260 H320" marker-end="url(#arrow)"/>
+          <path class="route input-route" d="M660 260 H820" marker-end="url(#arrow)"/>
+          <path class="route input-route" d="M1170 260 H1330" marker-end="url(#arrow)"/>
+          <text class="edge-label input-label" x="280" y="238">操作</text>
+          <text class="edge-label input-label" x="740" y="238">HTTP /keys</text>
+          <text class="edge-label input-label" x="1250" y="218"><tspan x="1250">keysファイル</tspan><tspan x="1250" dy="20">毎反復で読取</tspan></text>
+
+          <!-- Status lane: Main writes a file; browser polls through Python. -->
+          <path class="route status-route" d="M1330 380 H1170" marker-end="url(#arrow)"/>
+          <path class="route status-route" d="M820 380 H660" marker-end="url(#arrow)"/>
+          <text class="edge-label status-label" x="1250" y="338"><tspan x="1250">game-statusファイル</tspan><tspan x="1250" dy="20">10ゲームステップごと</tspan></text>
+          <text class="edge-label status-label" x="740" y="358">HTTP /status</text>
+
+          <!-- Audio lane: game events use a file; Python serves events and assets. -->
+          <path class="route audio-route" d="M1330 510 H1170" marker-end="url(#arrow)"/>
+          <path class="route audio-route" d="M820 510 H660" marker-end="url(#arrow)"/>
+          <path class="route audio-route" d="M320 510 H240" marker-end="url(#arrow)"/>
+          <text class="edge-label audio-label" x="1250" y="468"><tspan x="1250">audio-eventsファイル</tspan><tspan x="1250" dy="20">ゲームイベント時</tspan></text>
+          <text class="edge-label audio-label" x="740" y="468"><tspan x="740">long pollイベント</tspan><tspan x="740" dy="20">＋音源データ</tspan></text>
+          <text class="edge-label audio-label" x="280" y="488">BGM・SE</text>
+
+          <!-- Video lane: C++ creates JPEG; Python only packages it as MJPEG. -->
+          <path class="route frame-route" d="M1330 650 H1170" marker-end="url(#arrow)"/>
+          <path class="route frame-route" d="M820 650 H660" marker-end="url(#arrow)"/>
+          <path class="route frame-route" d="M320 650 H240" marker-end="url(#arrow)"/>
+          <text class="edge-label frame-label" x="1250" y="628">frame.jpg（新JPEG）</text>
+          <text class="edge-label frame-label" x="740" y="628">MJPEG・最大30 fps</text>
+          <text class="edge-label frame-label" x="280" y="628">Canvas</text>
+
+          <!-- Stage control and completed RGBA frames pass through host shared RAM. -->
+          <path class="route control-route" d="M1770 205 H1900" marker-end="url(#arrow)"/>
+          <path class="route control-route" d="M2180 205 H2310" marker-end="url(#arrow)"/>
+          <path class="route ray-route" d="M2310 610 H2180" marker-end="url(#arrow)"/>
+          <path class="route ray-route" d="M1900 610 H1770" marker-end="url(#arrow)"/>
+          <text class="edge-label control-label" x="1835" y="183">stage書換</text>
+          <text class="edge-label control-label" x="2245" y="183">stage読取</text>
+          <text class="edge-label ray-label" x="2245" y="588">RGBA8公開</text>
+          <text class="edge-label ray-label" x="1835" y="588">RGBA8取込</text>
+
+          <!-- OpenGL and CUDA are separate workloads on the same physical GPU. -->
+          <path class="route gl-route" d="M1415 750 V915" marker-end="url(#arrow)"/>
+          <path class="route result-route" d="M1730 915 V750" marker-end="url(#arrow)"/>
+          <text class="edge-label gl-label" x="1490" y="800"><tspan x="1490">OpenGL命令</tspan><tspan x="1490" dy="20">毎ゲーム反復</tspan></text>
+          <text class="edge-label result-label" x="1810" y="800"><tspan x="1810">PBO完了を回収</tspan><tspan x="1810" dy="20">CPU RGBへ</tspan></text>
+
+          <path class="route gl-route" d="M2370 750 V915" marker-end="url(#arrow)"/>
+          <path class="route result-route" d="M2500 915 V750" marker-end="url(#arrow)"/>
+          <text class="edge-label gl-label" x="2335" y="790" style="text-anchor:end"><tspan x="2335">sceneをhost→device</tspan><tspan x="2335" dy="20">CUDA kernel起動</tspan></text>
+          <text class="edge-label result-label" x="2580" y="820" style="text-anchor:end"><tspan x="2580">float RGB</tspan><tspan x="2580" dy="20">device→host</tspan></text>
+        </svg>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
