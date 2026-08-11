@@ -45,8 +45,7 @@ is released automatically instead of remaining stuck.
 ## Fresh Colab runtime
 
 Select a GPU runtime, then run this shell cell once.  It installs dependencies,
-checks out `main` in the Monadius repository and
-`feature/shared-memory-ray-background` in the Lisp repository, prepares cl-cuda
+checks out `main` in both the Monadius and Lisp repositories, prepares cl-cuda
 and the small shared-memory library, builds Effekseer and Monadius, and starts
 the local bridge. The packaged Colab SBCL is used only in its own process; no
 custom SBCL runtime is compiled or loaded into `Main`:

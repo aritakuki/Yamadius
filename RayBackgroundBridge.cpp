@@ -25,7 +25,7 @@ extern char** environ;
 
 namespace {
 constexpr uint64_t kSharedMagic = UINT64_C(0x4d4f4e4152495553);
-constexpr uint32_t kSharedVersion = 1;
+constexpr uint32_t kSharedVersion = 2;
 constexpr uint32_t kBufferCount = 3;
 constexpr uint32_t kPixelFormatRgba8 = 1;
 constexpr uint32_t kNoReader = UINT32_MAX;
@@ -51,7 +51,7 @@ struct alignas(64) SharedHeader {
   uint64_t pixelBytes;            // 32
   uint64_t totalBytes;            // 40
   uint32_t producerPid;           // 48
-  uint32_t reserved0;             // 52
+  uint32_t requestedStage;        // 52
   uint64_t reserved1;             // 56
   uint64_t generation;            // 64
   uint32_t frontIndex;            // 72
@@ -68,6 +68,8 @@ static_assert(sizeof(SharedHeader) == 128,
               "live background shared header must be 128 bytes");
 static_assert(offsetof(SharedHeader, generation) == 64,
               "live background atomic fields moved");
+static_assert(offsetof(SharedHeader, requestedStage) == 52,
+              "live background stage field moved");
 static_assert(offsetof(SharedHeader, heartbeat) == 96,
               "live background protocol layout changed");
 
@@ -255,6 +257,7 @@ bool allocateSharedMemory(int* inheritedFd) {
   sharedHeader->pixelFormat = kPixelFormatRgba8;
   sharedHeader->pixelBytes = pixelBytes;
   sharedHeader->totalBytes = sharedMappingBytes;
+  atomicStore(&sharedHeader->requestedStage, uint32_t{1});
   atomicStore(&sharedHeader->frontIndex, uint32_t{0});
   atomicStore(&sharedHeader->readerIndex, kNoReader);
   atomicStore(&sharedHeader->stopRequested, uint32_t{0});
@@ -605,7 +608,15 @@ extern "C" int initRayBackground() {
   return 1;
 }
 
-extern "C" void renderRayBackground(int x, int y, int width, int height) {
+extern "C" void renderRayBackground(int stage, int x, int y, int width,
+                                      int height) {
+  if (sharedHeader != nullptr) {
+    const uint32_t requestedStage =
+        stage >= 1 && stage <= 3 ? static_cast<uint32_t>(stage) : uint32_t{1};
+    if (atomicLoad(&sharedHeader->requestedStage) != requestedStage) {
+      atomicStore(&sharedHeader->requestedStage, requestedStage);
+    }
+  }
   if (!backgroundEnabled || backgroundTexture == 0 || width <= 0 ||
       height <= 0) {
     return;

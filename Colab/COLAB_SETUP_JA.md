@@ -1,7 +1,6 @@
 # Monadius Colab 初期セットアップ・再接続手順
 
-対象ブランチはMonadiusが `main`、Lisp側が
-`feature/shared-memory-ray-background` です。
+対象ブランチは両リポジトリとも `main` です。
 Colab上の配置先はMonadiusが `/content/Yamadius-colab`、Lispが
 `/content/lisp-raytracer` です。
 
@@ -137,8 +136,8 @@ Lisp側が更新された場合は、Lisp用ブランチも取得し、別プロ
 共有メモリライブラリを作り直します。
 
 ```bash
-!git -C /content/lisp-raytracer fetch origin feature/shared-memory-ray-background
-!git -C /content/lisp-raytracer switch feature/shared-memory-ray-background
+!git -C /content/lisp-raytracer fetch origin main
+!git -C /content/lisp-raytracer switch main
 !git -C /content/lisp-raytracer pull --ff-only
 !bash Colab/build-ray-background-runtime.sh /content/lisp-raytracer /content/monadius-ray-runtime
 ```

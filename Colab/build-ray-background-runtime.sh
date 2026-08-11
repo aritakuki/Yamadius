@@ -52,6 +52,7 @@ rm -f "$PROTOCOL_TEST"
 
 test -s "$SHARED_LIBRARY"
 nm -D "$SHARED_LIBRARY" | grep -q ' monadiusSharedArmParentDeath$'
+nm -D "$SHARED_LIBRARY" | grep -q ' monadiusSharedStage$'
 nm -D "$SHARED_LIBRARY" | grep -q ' monadiusSharedPublishRgb$'
 printf 'Live ray background shared library: %s\n' "$SHARED_LIBRARY"
 printf 'Live ray background Lisp entry: %s\n' "$LISP_ENTRY"
