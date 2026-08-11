@@ -23,6 +23,8 @@ from urllib.parse import parse_qs, urlparse
 
 
 FRAME_STREAM_INTERVAL_SECONDS = 1.0 / 30.0
+AUDIO_EVENT_CHECK_INTERVAL_SECONDS = 0.01
+MAX_EFFECT_EVENT_AGE_MILLISECONDS = 1000
 AUDIO_RANGE_CHUNK_BYTES = 256 * 1024
 INPUT_LEASE_SECONDS = 3.0
 
@@ -68,10 +70,9 @@ let inputSequence = 0;
 let pendingInput = null;
 let inputInFlight = null;
 let inputFlushTimer = null;
-let audioOffset = -1;
 let audioUnlocked = false;
-let audioPollController = null;
 let statusPollController = null;
+const maxEffectEventAgeMilliseconds = 1000;
 const names = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
                ' ':'space', a:'a', A:'a', f:'f', F:'f', g:'g', G:'g'};
 function inputValue() {
@@ -126,7 +127,6 @@ function send(preemptWaitingRequests = false) {
     inputInFlight.controller.abort();
   }
   if (preemptWaitingRequests) {
-    if (audioPollController !== null) audioPollController.abort();
     if (statusPollController !== null) statusPollController.abort();
   }
 
@@ -212,6 +212,7 @@ const wait = milliseconds =>
     new Promise(resolve => setResponsiveTimeout(resolve, milliseconds));
 const headerBreak = new Uint8Array([13, 10, 13, 10]);
 const headerDecoder = new TextDecoder('ascii');
+const payloadDecoder = new TextDecoder('utf-8');
 function findBytes(haystack, needle) {
   outer: for (let i = 0; i <= haystack.length - needle.length; ++i) {
     for (let j = 0; j < needle.length; ++j) {
@@ -263,17 +264,31 @@ async function receiveFrameStream() {
           }
           const header = headerDecoder.decode(buffered.subarray(0, headerEnd));
           const lengthMatch = /Content-Length:\s*(\d+)/i.exec(header);
-          const sequenceMatch = /X-Monadius-Frame:\s*(\d+)/i.exec(header);
-          if (!lengthMatch || !sequenceMatch) throw new Error('invalid frame metadata');
+          const contentTypeMatch = /Content-Type:\s*([^\\r\\n]+)/i.exec(header);
+          if (!lengthMatch || !contentTypeMatch) throw new Error('invalid stream metadata');
           const length = Number(lengthMatch[1]);
           if (!Number.isSafeInteger(length) || length <= 0 || length > 32 * 1024 * 1024) {
-            throw new Error('invalid frame length');
+            throw new Error('invalid stream part length');
           }
-          const jpegStart = headerEnd + headerBreak.length;
-          const jpegEnd = jpegStart + length;
-          if (buffered.length < jpegEnd + 2) break;
-          queueLatestFrame(sequenceMatch[1], buffered.slice(jpegStart, jpegEnd));
-          buffered = buffered.slice(jpegEnd + 2);
+          const payloadStart = headerEnd + headerBreak.length;
+          const payloadEnd = payloadStart + length;
+          if (buffered.length < payloadEnd + 2) break;
+          const payload = buffered.slice(payloadStart, payloadEnd);
+          const contentType = contentTypeMatch[1].toLowerCase();
+          if (contentType.startsWith('image/jpeg')) {
+            const sequenceMatch = /X-Monadius-Frame:\s*(\d+)/i.exec(header);
+            if (!sequenceMatch) throw new Error('invalid frame metadata');
+            queueLatestFrame(sequenceMatch[1], payload);
+          } else if (contentType.startsWith('application/json')) {
+            const messageMatch = /X-Monadius-Message:\s*([^\\r\\n]+)/i.exec(header);
+            if (messageMatch && messageMatch[1].trim().toLowerCase() === 'audio') {
+              const audioUpdate = JSON.parse(payloadDecoder.decode(payload));
+              if (Array.isArray(audioUpdate.events)) {
+                for (const event of audioUpdate.events) applyAudioEvent(event);
+              }
+            }
+          }
+          buffered = buffered.slice(payloadEnd + 2);
         }
       }
     } catch (_) {
@@ -323,7 +338,11 @@ function stopEffect(path) {
   sound.pause(); sound.currentTime = 0;
 }
 function applyAudioEvent(event) {
-  const [action, path, gain = 1.0] = event;
+  const [action, path, gain = 1.0, emittedAt = null] = event;
+  if (action === 'play' && Number.isFinite(emittedAt) &&
+      Date.now() - emittedAt > maxEffectEventAgeMilliseconds) {
+    return;
+  }
   if (action === 'bgm') {
     const next = audioUrl(path);
     if (bgm.getAttribute('src') !== next) {
@@ -338,38 +357,6 @@ function applyAudioEvent(event) {
     playEffect(path, gain);
   } else if (action === 'stop') {
     stopEffect(path);
-  }
-}
-async function pollAudioEvents() {
-  while (true) {
-    if (inputInFlight !== null || pendingInput !== null) {
-      await wait(25);
-      continue;
-    }
-
-    let retryDelay = 0;
-    const controller = new AbortController();
-    audioPollController = controller;
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    try {
-      const response = await fetch('/audio-events?offset=' + audioOffset,
-                                   {cache:'no-store', signal:controller.signal});
-      if (!response.ok) throw new Error('audio event request failed');
-      const update = await response.json();
-      audioOffset = update.offset;
-      for (const event of update.events) applyAudioEvent(event);
-    } catch (_) {
-      if (!controller.signal.aborted) {
-        audioState.textContent = 'audio: bridge unavailable';
-        retryDelay = 250;
-      } else {
-        retryDelay = 25;
-      }
-    } finally {
-      clearTimeout(timeout);
-      if (audioPollController === controller) audioPollController = null;
-    }
-    if (retryDelay > 0) await wait(retryDelay);
   }
 }
 async function pollStatus() {
@@ -491,16 +478,106 @@ openWindowButton.addEventListener('click', openGameWindow);
 setInterval(syncGameWindowStatus, 250);
 // Only the window currently receiving input sends lease heartbeats.  Running
 // both the iframe and pop-out timers doubled input traffic and competed with
-// audio delivery for the same Colab proxy connections.
+// media delivery for the same Colab proxy connections.
 setInterval(() => {
   if ((gameWindow === null || gameWindow.closed) && held.size) send(false);
 }, 250);
 send(true);
 receiveFrameStream();
 displayLatestFrames();
-pollAudioEvents();
 pollStatus();
 </script></body></html>"""
+
+
+def read_audio_event_update(
+    audio_event_file: Path,
+    requested_offset: int,
+    *,
+    include_timestamps: bool,
+) -> tuple[int, list[list[object]], bool]:
+    """Read one complete event-file update without waiting.
+
+    A negative or invalidated offset is a reconnect snapshot: return only the
+    current BGM state and skip historical effects. Incremental reads return all
+    complete lines after the caller's offset.
+    """
+    snapshot = requested_offset < 0
+    complete_data = b""
+    next_offset = 0
+    try:
+        size = audio_event_file.stat().st_size
+        snapshot = snapshot or requested_offset > size
+        start = 0 if snapshot else requested_offset
+        with audio_event_file.open("rb") as stream:
+            stream.seek(start)
+            data = stream.read()
+        last_newline = data.rfind(b"\n")
+        if last_newline >= 0:
+            complete_data = data[:last_newline + 1]
+            next_offset = start + last_newline + 1
+        else:
+            next_offset = start
+    except FileNotFoundError:
+        pass
+
+    parsed = parse_audio_events(complete_data)
+    if snapshot:
+        current_bgm = None
+        for action, path, gain, emitted_at in parsed:
+            if action == "bgm":
+                current_bgm = [path, gain, emitted_at]
+            elif action == "stop-bgm":
+                current_bgm = None
+        if current_bgm is None:
+            events: list[list[object]] = []
+        elif include_timestamps:
+            events = [["bgm", current_bgm[0], current_bgm[1], current_bgm[2]]]
+        else:
+            events = [["bgm", current_bgm[0], current_bgm[1]]]
+    elif include_timestamps:
+        events = parsed
+    else:
+        events = [
+            [action, path, gain]
+            for action, path, gain, _emitted_at in parsed
+        ]
+    return next_offset, events, snapshot or bool(complete_data)
+
+
+def chunked_multipart_part(
+    boundary: bytes,
+    content_type: str,
+    payload: bytes,
+    headers: tuple[tuple[str, str], ...] = (),
+) -> bytes:
+    part_headers = [
+        b"--" + boundary,
+        f"Content-Type: {content_type}".encode("ascii"),
+        f"Content-Length: {len(payload)}".encode("ascii"),
+    ]
+    part_headers.extend(f"{name}: {value}".encode("ascii") for name, value in headers)
+    part = b"\r\n".join(part_headers) + b"\r\n\r\n" + payload + b"\r\n"
+    return f"{len(part):x}\r\n".encode("ascii") + part + b"\r\n"
+
+
+def discard_stale_effect_events(
+    events: list[list[object]],
+    *,
+    now_milliseconds: int | None = None,
+) -> list[list[object]]:
+    """Never turn transport backlog into a late burst of sound effects."""
+    if now_milliseconds is None:
+        now_milliseconds = time.time_ns() // 1_000_000
+    return [
+        event
+        for event in events
+        if not (
+            len(event) >= 4
+            and event[0] == "play"
+            and isinstance(event[3], int)
+            and now_milliseconds - event[3] > MAX_EFFECT_EVENT_AGE_MILLISECONDS
+        )
+    ]
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -602,38 +679,66 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         last_modified = -1
         next_frame_time = 0.0
+        audio_offset = -1
+        next_audio_check = 0.0
         try:
             while True:
-                delay = next_frame_time - time.monotonic()
-                if delay > 0:
-                    time.sleep(min(delay, 0.01))
-                    continue
-                try:
-                    if self.frame_file.stat().st_mtime_ns <= last_modified:
-                        time.sleep(0.002)
-                        continue
-                    with self.frame_file.open("rb") as stream:
-                        modified = os.fstat(stream.fileno()).st_mtime_ns
-                        if modified <= last_modified:
-                            continue
-                        frame = stream.read()
-                except FileNotFoundError:
-                    time.sleep(0.004)
-                    continue
+                wrote_part = False
+                now = time.monotonic()
+                if now >= next_audio_check:
+                    next_audio_check = now + AUDIO_EVENT_CHECK_INTERVAL_SECONDS
+                    next_offset, events, has_update = read_audio_event_update(
+                        self.audio_event_file,
+                        audio_offset,
+                        include_timestamps=True,
+                    )
+                    if has_update:
+                        events = discard_stale_effect_events(events)
+                        payload = json.dumps(
+                            {"offset": next_offset, "events": events},
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                        self.wfile.write(
+                            chunked_multipart_part(
+                                boundary,
+                                "application/json; charset=utf-8",
+                                payload,
+                                (("X-Monadius-Message", "audio"),),
+                            )
+                        )
+                        self.wfile.flush()
+                        audio_offset = next_offset
+                        wrote_part = True
 
-                part = (
-                    b"--" + boundary + b"\r\n"
-                    b"Content-Type: image/jpeg\r\n"
-                    + f"Content-Length: {len(frame)}\r\n".encode("ascii")
-                    + f"X-Monadius-Frame: {modified}\r\n\r\n".encode("ascii")
-                    + frame
-                    + b"\r\n"
-                )
-                chunk = f"{len(part):x}\r\n".encode("ascii") + part + b"\r\n"
-                self.wfile.write(chunk)
-                self.wfile.flush()
-                last_modified = modified
-                next_frame_time = time.monotonic() + FRAME_STREAM_INTERVAL_SECONDS
+                now = time.monotonic()
+                if now >= next_frame_time:
+                    try:
+                        if self.frame_file.stat().st_mtime_ns > last_modified:
+                            with self.frame_file.open("rb") as stream:
+                                modified = os.fstat(stream.fileno()).st_mtime_ns
+                                if modified > last_modified:
+                                    frame = stream.read()
+                                    self.wfile.write(
+                                        chunked_multipart_part(
+                                            boundary,
+                                            "image/jpeg",
+                                            frame,
+                                            (("X-Monadius-Frame", str(modified)),),
+                                        )
+                                    )
+                                    self.wfile.flush()
+                                    last_modified = modified
+                                    next_frame_time = (
+                                        time.monotonic()
+                                        + FRAME_STREAM_INTERVAL_SECONDS
+                                    )
+                                    wrote_part = True
+                    except FileNotFoundError:
+                        pass
+
+                if not wrote_part:
+                    time.sleep(0.002)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             self.close_connection = True
             return
@@ -651,45 +756,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             requested_offset = -1
 
-        snapshot = requested_offset < 0
         deadline = time.monotonic() + 2.0
         while True:
-            complete_data = b""
-            next_offset = 0
-            if self.audio_event_file.is_file():
-                size = self.audio_event_file.stat().st_size
-                snapshot = snapshot or requested_offset > size
-                start = 0 if snapshot else requested_offset
-                with self.audio_event_file.open("rb") as stream:
-                    stream.seek(start)
-                    data = stream.read()
-                last_newline = data.rfind(b"\n")
-                if last_newline >= 0:
-                    complete_data = data[:last_newline + 1]
-                    next_offset = start + last_newline + 1
-                else:
-                    next_offset = start
-            if snapshot or complete_data or time.monotonic() >= deadline:
+            next_offset, events, has_update = read_audio_event_update(
+                self.audio_event_file,
+                requested_offset,
+                include_timestamps=False,
+            )
+            if has_update or time.monotonic() >= deadline:
                 break
             time.sleep(0.01)
-
-        events = parse_audio_events(complete_data)
-        if snapshot:
-            current_bgm = None
-            for action, path, gain, _emitted_at in events:
-                if action == "bgm":
-                    current_bgm = [path, gain]
-                elif action == "stop-bgm":
-                    current_bgm = None
-            events = [["bgm", current_bgm[0], current_bgm[1]]] if current_bgm else []
-        else:
-            # Delivery can be delayed by Colab's proxy even though the game
-            # emitted the event on time.  Never turn transport delay into a
-            # silently missing effect.
-            events = [
-                [action, path, gain]
-                for action, path, gain, _emitted_at in events
-            ]
 
         payload = json.dumps({"offset": next_offset, "events": events}).encode("utf-8")
         self.send_response(200)

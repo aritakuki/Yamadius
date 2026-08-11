@@ -12,8 +12,8 @@ browser keys -> Colab bridge -> key file -> Haskell game loop
 Lisp/CUDA process -> complete RGB frame -> anonymous shared-RAM triple buffer + generation
 Haskell frame -> new generation only: OpenGL texture upload -> draw current background
 Haskell/OpenGL -> NVIDIA EGL -> asynchronous PBO readback -> JPEG worker
-latest completed JPEG -> one continuous stream -> browser latest-frame slot -> Canvas
-game BGM/SE calls -> audio event stream -> browser audio elements
+latest completed JPEG -> one continuous multipart stream -> browser latest-frame slot -> Canvas
+game BGM/SE calls -> audio event file -> JSON parts on the same stream -> browser audio elements
 ```
 
 GPU rendering never waits for JPEG compression or notebook networking.  The
@@ -36,11 +36,14 @@ SBCL child so the CUDA renderer cannot remain orphaned.
 
 The browser receives a one-time Ogg/Opus cache instead of the very large PCM
 WAV files used by the native game, and audio Range responses are bounded so a
-BGM transfer cannot occupy every notebook-proxy connection.  Input transitions
-temporarily preempt replaceable background polls so they cannot wait behind a
-full proxy connection pool; interrupted effect polling then resumes from its
-previous offset.  If key heartbeats stop reaching the bridge, a held direction
-is released automatically instead of remaining stuck.
+BGM transfer cannot occupy every notebook-proxy connection. Tiny audio-event
+JSON parts share the already-open frame response instead of occupying a second
+long-poll connection. Input transitions retain their high-priority `/keys`
+path and can still preempt the replaceable status poll. A reconnect restores
+the current BGM without replaying historical effects, and a `play` event that
+somehow arrives over a second late is ignored rather than emitted as a delayed
+burst. If key heartbeats stop reaching the bridge, a held direction is released
+automatically instead of remaining stuck.
 
 ## Fresh Colab runtime
 
