@@ -148,7 +148,7 @@
       color: var(--ink);
       background: #fff;
       font-size: 18px;
-      font-weight: 780;
+      font-weight: 500;
       white-space: nowrap;
     }
 
@@ -185,6 +185,29 @@
       );
     }
     .key-item.status::before { border-top-style: dotted; border-top-width: 2px; }
+    .key-item.control::after {
+      content: "◆";
+      margin-left: -5px;
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 1;
+    }
+    .key-item.status::after {
+      content: "○";
+      margin-left: -5px;
+      color: var(--ink);
+      font-size: 15px;
+      line-height: 1;
+    }
+    .key-item.box::before {
+      width: 24px;
+      height: 16px;
+      border: 2px solid var(--ink);
+    }
+    .key-item.box-environment::before { border-style: dashed; }
+    .key-item.box-gpu::before { border-style: dashed; border-width: 2px; }
+    .key-item.box-note::before { border-style: dotted; border-width: 1.5px; }
+    .key-item.trigger::before { display: none; }
 
     .key-separator {
       width: 1px;
@@ -257,13 +280,18 @@
       color: var(--ink);
       font-size: 26px;
       line-height: 1.25;
+      font-weight: 700;
+    }
+
+    .svg-node strong + strong {
+      margin-top: 2px;
     }
 
     .svg-node .role {
       margin-top: 3px;
       color: #222;
       font-size: 18px;
-      font-weight: 750;
+      font-weight: 400;
     }
 
     .svg-node .details {
@@ -280,6 +308,15 @@
       margin-top: 12px;
     }
 
+    .trigger-list::before {
+      content: "動く条件";
+      color: var(--soft-ink);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-align: left;
+    }
+
     .trigger {
       border: 1px solid var(--ink);
       border-radius: 9px;
@@ -287,7 +324,7 @@
       color: var(--ink);
       background: #fff;
       font-size: 18px;
-      font-weight: 800;
+      font-weight: 400;
       line-height: 1.3;
     }
 
@@ -324,7 +361,19 @@
 
     .component b {
       color: var(--ink);
-      font-weight: 900;
+      font-weight: 600;
+    }
+
+    .svg-node .footnote {
+      display: block;
+      margin-top: 6px;
+      color: #333;
+      font-size: 18px;
+      line-height: 1.35;
+    }
+
+    .svg-node.lisp-node {
+      justify-content: flex-start;
     }
 
     .svg-node.compact {
@@ -343,6 +392,10 @@
 
     .svg-node.compact .trigger-list {
       margin-top: 7px;
+    }
+
+    .svg-node.compact .trigger-list::before {
+      display: none;
     }
 
     .svg-node.compact .trigger {
@@ -365,7 +418,7 @@
 
     .sync-note b {
       color: var(--ink);
-      text-decoration: underline;
+      font-weight: 400;
     }
 
     .architecture .route {
@@ -383,7 +436,7 @@
     .architecture .audio-route { stroke-dasharray: 12 5 2 5; }
     .architecture .gl-route { stroke-width: 2.4; stroke-dasharray: 6 5; }
     .architecture .result-route { stroke-width: 3.4; }
-    .architecture .status-route { stroke-width: 2.5; stroke-dasharray: 2 6; }
+    .architecture .status-route { stroke-width: 2.5; stroke-dasharray: 1 7; }
     .architecture .lifecycle-route { stroke-width: 2.4; stroke-dasharray: 12 6 2 6; }
 
     .architecture .edge-label {
@@ -392,7 +445,7 @@
       stroke-width: 7px;
       stroke-linejoin: round;
       font-size: 18px;
-      font-weight: 850;
+      font-weight: 400;
       text-anchor: middle;
     }
 
@@ -455,6 +508,22 @@
           <span class="key-item audio">音イベント・音源・再生</span>
           <span class="key-item status">状態表示</span>
         </div>
+        <div class="key-separator" aria-hidden="true"></div>
+        <div class="key-group boxes">
+          <span class="key-title">外側の枠</span>
+          <span class="key-item box">個別の構成要素</span>
+          <span class="key-item box box-environment">実行環境の範囲</span>
+          <span class="key-item box box-gpu">GPUの範囲</span>
+          <span class="key-item box box-note">補足説明</span>
+        </div>
+        <div class="key-separator" aria-hidden="true"></div>
+        <div class="key-group triggers">
+          <span class="key-title">内側の小枠（動く条件）</span>
+          <span class="key-item trigger event">イベント時</span>
+          <span class="key-item trigger paced">一定間隔</span>
+          <span class="key-item trigger complete">データ到着・処理完了時</span>
+          <span class="key-item trigger independent">独立して進む処理</span>
+        </div>
       </div>
 
       <div class="diagram-scroll">
@@ -464,6 +533,12 @@
           <defs>
             <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
               <path d="M0,0 L10,5 L0,10 z" fill="#111111"/>
+            </marker>
+            <marker id="control-arrow" markerWidth="11" markerHeight="11" refX="10" refY="5.5" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,5.5 L5.5,0 L11,5.5 L5.5,11 z" fill="#111111"/>
+            </marker>
+            <marker id="status-arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto" markerUnits="userSpaceOnUse">
+              <circle cx="5.5" cy="5.5" r="4.3" fill="#ffffff" stroke="#111111" stroke-width="1.6"/>
             </marker>
           </defs>
 
@@ -490,12 +565,12 @@
               <span class="role">JavaScript・Canvas・HTML Audio</span>
               <p class="details">/frame-streamを継続受信<br/>JPEGをCanvasへ、音イベントJSONを音声処理へ振分け<br/>音源は必要時に/audioから取得</p>
               <div class="trigger-list">
-                <span class="trigger event">入力：keydown / keyup時</span>
-                <span class="trigger paced">キー保持中：250 msごとに再送</span>
-                <span class="trigger paced">状態：500 msごとにHTTP要求</span>
-                <span class="trigger complete">Canvas：JPEG到着ごと・最新優先</span>
-                <span class="trigger independent">音声：初回クリックで許可／イベント到着で開始</span>
-                <span class="trigger independent">再生開始後：ブラウザのメディア時計で進行</span>
+                <span class="trigger event">keydown / keyup時</span>
+                <span class="trigger paced">キー保持中：250 msごと</span>
+                <span class="trigger paced">500 msごと</span>
+                <span class="trigger complete">JPEG到着時</span>
+                <span class="trigger independent">初回クリック後／音イベント到着時</span>
+                <span class="trigger independent">再生開始後</span>
               </div>
             </div>
           </foreignObject>
@@ -505,13 +580,13 @@
             <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node bridge-node">
               <strong>Pythonブリッジ</strong>
               <span class="role">Colab内のHTTPサーバー</span>
-              <p class="details">/keysをkeysファイルへ反映<br/>frame.jpgとaudio-eventsファイルを監視<br/>JPEG＋音イベントJSONを/frame-streamへ多重化<br/>/statusと/audioのOgg/Opus音源を配信</p>
+              <p class="details">/keysをkeysファイルへ反映<br/>frame.jpgとaudio-eventsを監視<br/>JPEG＋音イベントJSONを/frame-streamへ多重化<br/>/statusを配信<br/>/audioでOgg/Opus音源を配信</p>
               <div class="trigger-list">
-                <span class="trigger event">要求駆動：/keys・/status・/audio</span>
-                <span class="trigger paced">映像配信：新JPEGのみ・最大30 fps</span>
-                <span class="trigger paced">音イベント：10 msごとに確認／発見時に配信</span>
-                <span class="trigger complete">再接続：現在BGMのみ／1秒超のSEは破棄</span>
-                <span class="trigger paced">入力監視：50 ms／3秒無通信で解除</span>
+                <span class="trigger event">/keys・/status・/audioへの要求時</span>
+                <span class="trigger complete">frame.jpgの更新時（最大30 fps）</span>
+                <span class="trigger paced">10 msごと</span>
+                <span class="trigger complete">再接続時</span>
+                <span class="trigger paced">50 msごと／3秒無通信時</span>
               </div>
             </div>
           </foreignObject>
@@ -519,16 +594,13 @@
           <rect class="node-frame" x="1330" y="130" width="440" height="620" rx="24"/>
           <foreignObject x="1330" y="130" width="440" height="620">
             <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node haskell-node" style="padding:13px">
+              <strong>【Yamadius】</strong>
               <strong>Mainプロセス</strong>
               <span class="role">Haskell + リンクされたC++</span>
               <div class="component-list">
                 <div class="component"><b>Haskell</b><br/>入力・自機・敵・弾・衝突・stageを1ステップ更新。描画命令、audio-events、statusを発行</div>
-                <div class="component"><b>RayBackgroundBridge.cpp</b><br/>memfd作成、SBCL起動・終了、新generation確認、RGBA8をOpenGL textureへ転送</div>
-                <div class="component"><b>EglBridge.cpp / EffekseerBridge.cpp</b><br/>EGL、非同期PBO読出し、CPU上のlibjpeg処理、エフェクト描画</div>
-              </div>
-              <div class="trigger-list">
-                <span class="trigger">ゲーム処理・描画 → 16 ms休止 → 次へ</span>
-                <span class="trigger">1反復＝ゲーム世界を1ステップ更新</span>
+                <div class="component"><b>RayBackgroundBridge.cpp</b><br/>memfd作成、SBCL起動・終了<br/>新generation確認、RGBA8をOpenGL textureへ転送</div>
+                <div class="component"><b>EglBridge.cpp / EffekseerBridge.cpp</b><br/>EGL、非同期PBO読出し<br/>CPU上のlibjpeg処理、エフェクト描画</div>
               </div>
             </div>
           </foreignObject>
@@ -540,10 +612,8 @@
               <span class="role">memfd・CPUホストRAM</span>
               <p class="details">header：stage・generation・front・reader<br/>RGBA8：3バッファ（既定800×600）</p>
               <div class="trigger-list">
-                <span class="trigger independent">自分では動かない受動的な受渡し領域</span>
-                <span class="trigger event">stage：値が変わった時だけMainが書換え</span>
-                <span class="trigger complete">RGBA：C共有ライブラリが1枚完成時に公開</span>
-                <span class="trigger">Mainが描画ごとに新generationを確認</span>
+                <span class="trigger event">stageが変わった時</span>
+                <span class="trigger complete">RGBA画像が完成した時</span>
               </div>
             </div>
           </foreignObject>
@@ -551,16 +621,14 @@
           <rect class="node-frame" x="2310" y="130" width="300" height="620" rx="24"/>
           <foreignObject x="2310" y="130" width="300" height="620">
             <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node lisp-node" style="padding:12px">
-              <strong>SBCLプロセス</strong>
+              <strong>【Ray Tracer】</strong>
+              <strong>SBCL（※）プロセス</strong>
               <span class="role">Common Lisp + C helper</span>
               <div class="component-list">
-                <div class="component"><b>Common Lisp / cl-cuda</b><br/>カメラ・球・材質を更新し、stageを読み、CUDA kernelを起動</div>
+                <div class="component"><b>Common Lisp / cl-cuda</b><br/>カメラ・球・材質を更新し、stageを読む<br/>CUDA kernelを起動</div>
                 <div class="component"><b>Lisp側ホストメモリ</b><br/>CUDAデバイスからfloat RGBをdevice-to-host転送</div>
                 <div class="component"><b>monadius-shared-memory.c</b><br/>float RGBをRGBA8へ変換し、完成後に共有メモリへ公開</div>
-              </div>
-              <div class="trigger-list">
-                <span class="trigger complete">固定周期なし：1枚完成後すぐ次へ</span>
-                <span class="trigger complete">frame / 60は座標計算であり時計ではない</span>
+                <span class="footnote">（※）SBCL<br/>Steel Bank Common Lisp<br/>Common Lispを実行する<br/>Lisp処理系です。</span>
               </div>
             </div>
           </foreignObject>
@@ -573,7 +641,6 @@
             <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node gpu-node compact">
               <strong>OpenGL描画処理</strong>
               <p class="details">レイトレ背景texture＋地形＋キャラクター＋HUD＋Effekseer＋字幕をEGL pbufferへ合成</p>
-              <div class="trigger-list"><span class="trigger command">Mainのゲーム反復ごとに命令を受ける</span></div>
             </div>
           </foreignObject>
 
@@ -582,14 +649,13 @@
             <div xmlns="http://www.w3.org/1999/xhtml" class="svg-node gpu-node compact">
               <strong>CUDA raytrace kernel</strong>
               <p class="details">各pixelのray・交差・陰影・影・反射・屈折・空色を並列計算し、float RGBを出力</p>
-              <div class="trigger-list"><span class="trigger command">Lispが背景1枚ごとに起動</span></div>
             </div>
           </foreignObject>
 
           <rect class="sync-frame" x="1290" y="1125" width="1320" height="60" rx="17"/>
           <foreignObject x="1290" y="1125" width="1320" height="60">
             <div xmlns="http://www.w3.org/1999/xhtml" class="sync-note">
-              <span><b>共通の1本の時計はありません。</b> Mainは処理時間＋16 ms休止、Lispは1枚完成駆動、Pythonは音イベントを10 ms確認・新JPEGを最大30 fps配信、ブラウザは到着ごとに描画・再生します。</span>
+              <span><b>共通の1本の時計はありません。</b> Mainは処理時間＋16 ms休止、Lispは1枚完成駆動、Pythonは音イベントを10 ms確認・更新されたゲーム画面を最大30 fps配信、ブラウザは到着ごとに描画・再生します。</span>
             </div>
           </foreignObject>
 
@@ -606,9 +672,9 @@
           <text class="edge-label input-label" x="1250" y="218"><tspan x="1250">keysファイル</tspan><tspan x="1250" dy="20">毎反復で読取</tspan></text>
 
           <!-- Status lane: Main writes a file; browser polls through Python. -->
-          <path class="route status-route" d="M1330 380 H1170" marker-end="url(#arrow)"/>
-          <path class="route status-route" d="M820 380 H660" marker-end="url(#arrow)"/>
-          <text class="edge-label status-label" x="1250" y="338"><tspan x="1250">game-statusファイル</tspan><tspan x="1250" dy="20">10ゲームステップごと</tspan></text>
+          <path class="route status-route" d="M1330 380 H1170" marker-end="url(#status-arrow)"/>
+          <path class="route status-route" d="M820 380 H660" marker-end="url(#status-arrow)"/>
+          <text class="edge-label status-label" x="1250" y="338"><tspan x="1250">状態データを書出し</tspan><tspan x="1250" dy="20">およそ10反復ごと</tspan></text>
           <text class="edge-label status-label" x="740" y="358">HTTP /status</text>
 
           <!-- Audio lane: Main writes events; browser fetches only audio assets here. -->
@@ -623,13 +689,13 @@
           <path class="route frame-route" d="M1330 650 H1170" marker-end="url(#arrow)"/>
           <path class="route frame-route" d="M820 650 H660" marker-end="url(#arrow)"/>
           <path class="route frame-route" d="M320 650 H240" marker-end="url(#arrow)"/>
-          <text class="edge-label frame-label" x="1250" y="628">frame.jpg（新JPEG）</text>
+          <text class="edge-label frame-label" x="1250" y="600"><tspan x="1250">frame.jpg</tspan><tspan x="1250" dy="20">更新されたゲーム画面（JPEG）</tspan></text>
           <text class="edge-label frame-label" x="740" y="572"><tspan x="740">/frame-stream</tspan><tspan x="740" dy="20">JPEG＋音イベント</tspan><tspan x="740" dy="20">JSONを多重化</tspan></text>
           <text class="edge-label frame-label" x="280" y="628">Canvas</text>
 
           <!-- Stage control and completed RGBA frames pass through host shared RAM. -->
-          <path class="route control-route" d="M1770 205 H1900" marker-end="url(#arrow)"/>
-          <path class="route control-route" d="M2180 205 H2310" marker-end="url(#arrow)"/>
+          <path class="route control-route" d="M1770 205 H1900" marker-end="url(#control-arrow)"/>
+          <path class="route control-route" d="M2180 205 H2310" marker-end="url(#control-arrow)"/>
           <path class="route ray-route" d="M2310 610 H2180" marker-end="url(#arrow)"/>
           <path class="route ray-route" d="M1900 610 H1770" marker-end="url(#arrow)"/>
           <text class="edge-label control-label" x="1835" y="183">stage書換</text>
