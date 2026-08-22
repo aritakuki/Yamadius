@@ -181,7 +181,9 @@ main = do
               dispProc externalInputFile keystate cp
               endTime <- getCurrentTime
               let diff = diffUTCTime endTime startTime
-                  delay = max 0 (16000 - (round (realToFrac diff * 1000000)))
+                  -- 16ms (16000 microseconds) from startTime
+                  elapsedMicros = round (realToFrac diff * 1000000)
+                  delay = max 0 (16000 - elapsedMicros)
               threadDelay delay
               loop
         loop
