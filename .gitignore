@@ -41,3 +41,4 @@ cmake_install.cmake
 
 # Effekseer editor project files are not needed at runtime.
 /Effects/*.efkproj
+.aider*

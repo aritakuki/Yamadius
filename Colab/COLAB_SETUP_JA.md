@@ -48,6 +48,11 @@ Monadiusをすべて準備し、ポート8765で起動します。SBCLはColab�
 !curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/main/Colab/bootstrap-colab.sh | bash
 ```
 
+Colabで今回のブランチを確認する場合は、次のセルを使用してください。
+
+!curl -fsSL 'https://raw.githubusercontent.com/aritakuki/Yamadius/refs/heads/fix/colab-audio-event-latency/Colab/bootstrap-colab.sh'\
+    | env MONADIUS_BRANCH=fix/colab-audio-event-latency MONADIUS_LISP_BRANCH=main bash
+
 完了したら、次のPythonセルで画面を表示します。bootstrap処理がすでにゲームを
 起動しているため、ここでは二重起動せずiframeだけを表示します。
 
