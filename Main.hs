@@ -39,6 +39,7 @@ import           Foreign.Ptr
 import qualified Data.Map                        as Map
 import qualified Data.Set                        as Set
 import           System.Random
+import           Data.Time
 
 import           Demo               (ReplayInfo (..), demoData)
 import           Game               (isGameover, render, update, playSe)
@@ -176,8 +177,12 @@ main = do
         cp <- setupScene
         initMatrixSize (Size initialWidth initialHeight)
         let loop = do
+              startTime <- getCurrentTime
               dispProc externalInputFile keystate cp
-              threadDelay 16000
+              endTime <- getCurrentTime
+              let diff = diffUTCTime endTime startTime
+                  delay = max 0 (16000 - (round (realToFrac diff * 1000000)))
+              threadDelay delay
               loop
         loop
         c_finishEffeksser
