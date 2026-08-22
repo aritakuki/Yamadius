@@ -181,7 +181,7 @@ main = do
               dispProc externalInputFile keystate cp
               endTime <- getCurrentTime
               let diff = diffUTCTime endTime startTime
-                  -- 16ms (16000 microseconds) from startTime
+                  -- Calculate remaining time to maintain 62.5 FPS (16ms per frame)
                   elapsedMicros = round (realToFrac diff * 1000000)
                   delay = max 0 (16000 - elapsedMicros)
               threadDelay delay
