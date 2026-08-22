@@ -537,7 +537,13 @@ mainProc shieldTextures ses sounds vars gs ks = do
     uniqStrs = ("") : (map (("." ++) . show) ([1..] :: [Int]))
 
 timerProc :: IO () -> IO ()
-timerProc m = addTimerCallback 16 $ timerProc m >> m
+timerProc m = do
+  startTime <- getCurrentTime
+  m
+  endTime <- getCurrentTime
+  let diff = diffUTCTime endTime startTime
+      delay = max 0 (16 - (round (realToFrac diff * 1000)))
+  addTimerCallback delay $ timerProc m
 
 keyProc :: IORef [Key] -> Key -> KeyState -> t -> t1 -> IO ()
 keyProc keystate key ks _ _ =
