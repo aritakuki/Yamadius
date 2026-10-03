@@ -24,7 +24,7 @@ apt-get -qq install -y \
   libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libxcursor-dev \
   ghc cabal-install sbcl libffi-dev
 
-# 2. Cabalのセキュリティ・署名対策
+# 2. Cabalの設定
 mkdir -p /root/.cabal
 echo "active-repositories: hackage.haskell.org:override" > /root/.cabal/config
 echo "repository hackage.haskell.org" >> /root/.cabal/config
@@ -69,12 +69,16 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-# 6. 今日実際に動いた手順の反映（git resetなし、GHCオプション追加、CPATH設定、build.sh実行）
+# 6. 今日実際に動いた手順のそのままの反映（git resetなし、dist-newstyle削除のみ）
+rm -rf dist-newstyle/
+
+# build.sh のコンパイルオプションにGHC文法チェック緩和を追加
 sed -i 's/ghc -lstdc++/ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -lstdc++/g' build.sh
 
+# 手動で通ったのと同じ CPATH を指定
 export CPATH="/content/effekseer-install/include:/content/effekseer-install/include/Effekseer:/usr/include/freetype2:${CPATH:-}"
 
-echo "=== クリーンビルド実行 ==="
+echo "=== ビルド実行 ==="
 GHC_ENVIRONMENT="$HASKELL_PACKAGE_ENV" \
   MONADIUS_COLAB_EGL=1 \
   EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" \
