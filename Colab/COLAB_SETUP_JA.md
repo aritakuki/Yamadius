@@ -37,14 +37,21 @@ print("既存環境あり" if repo.is_dir() else "初期状態（再セットア
 「初期状態」と表示された場合は次の「完全セットアップ」を実行します。
 「既存環境あり」の場合は「既存環境のクリーン再起動」へ進みます。
 
-## 2. 完全セットアップ：`/content/Yamadius-colab` がない場合
+## 2. 完全セットアップ：`/contehnt/Yamadius-colab` がない場合
 
 ColabでGPUランタイムを選択してから、次のシェルセルを一度だけ実行します。
-依存パッケージ、両リポジトリ、cl-cudaと小さな共有メモリライブラリ、Effekseer、
+依存パッケージ、両リポジトリ、cl-cudaと小さな共有メモリライブラリ、Effekseer
 Monadiusをすべて準備し、ポート8765で起動します。SBCLはColabのパッケージ版を
 別プロセスとして使います。埋め込み用SBCLのコンパイルはありません。
 
 ```bash
+!apt-get -qq update && apt-get -qq install -y git-lfs
+!git lfs install
+!rm -rf /content/Yamadius-colab /content/lisp-raytracer
+!git clone --branch main https://github.com/aritakuki/Yamadius.git /content/Yamadius-colab
+!git clone --branch main https://github.com/aritakuki/lisp-raytracer.git /content/lisp-raytracer
+!git -C /content/Yamadius-colab lfs pull
+
 !curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/main/Colab/bootstrap-colab.sh | bash
 ```
 
