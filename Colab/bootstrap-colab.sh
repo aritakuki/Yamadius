@@ -2,8 +2,7 @@
 set -euo pipefail
 
 # ==============================================================================
-# Monadius (Yamadius) - まっさらな環境用 完全ビルド＆起動スクリプト
-# 明日、新しい環境で上からそのまま実行してください。
+# Monadius (Yamadius) - 完全版・自動修正つきビルド＆起動スクリプト
 # ==============================================================================
 
 REPO_DIR="${MONADIUS_REPO_DIR:-/content/Yamadius-colab}"
@@ -28,10 +27,8 @@ apt-get -qq install -y \
   libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libxcursor-dev \
   ghc cabal-install sbcl libffi-dev
 
-echo "=== [2/7] Cabal / GHC 環境の完全クリーンアップ ==="
-# まっさらな状態を保証するため、既存のキャッシュや登録情報をすべてクリア
+echo "=== [2/7] Cabal / GHC 環境のクリーンアップ ==="
 rm -rf /root/.cabal /root/.ghc
-
 mkdir -p /root/.cabal
 echo "active-repositories: hackage.haskell.org:override" > /root/.cabal/config
 echo "repository hackage.haskell.org" >> /root/.cabal/config
@@ -47,7 +44,6 @@ cd "$REPO_DIR"
 cabal update
 
 echo "=== [4/7] 依存 Haskell パッケージのインストール ==="
-# まっさらな状態なので重複エラーを起こさずにクリーンに導入されます
 cabal install --lib OpenGL GLUT ALUT JuicyPixels vector random
 
 echo "=== [5/7] Effekseer および Rayランタイムのビルド ==="
@@ -59,9 +55,13 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-echo "=== [6/7] ゲーム本体のビルド実行 ==="
+echo "=== [6/7] ビルド前のパッチ適用（GHC 9.4 対策） ==="
+# 今日やった「ghc コマンドに拡張オプションを追加する修正」を自動化します
+sed -i 's/ghc -lstdc++/ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -lstdc++/g' build.sh
+
 export CPATH="/content/effekseer-install/include:/content/effekseer-install/include/Effekseer:/usr/include/freetype2:${CPATH:-}"
 
+echo "=== ゲーム本体のビルド実行 ==="
 MONADIUS_COLAB_EGL=1 \
   EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" \
   bash build.sh
@@ -72,7 +72,7 @@ bash Colab/fresh-start.sh
 cat <<'EOF'
 
 ==============================================================================
-Monadius is running successfully!
+Monadius is running successfully! 
 To embed the game in a Colab output, execute the following Python snippet:
 
 from google.colab import output
