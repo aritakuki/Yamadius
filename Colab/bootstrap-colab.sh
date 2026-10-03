@@ -30,9 +30,6 @@ echo "repository hackage.haskell.org" >> /root/.cabal/config
 echo "  url: http://hackage.haskell.org/" >> /root/.cabal/config
 echo "  secure: False" >> /root/.cabal/config
 
-# 環境のクリーンアップ
-rm -rf /root/.ghc/x86_64-linux-*
-
 # 3. リポジトリのクローン・更新
 if [[ -d "$REPO_DIR/.git" ]]; then
   git -C "$REPO_DIR" fetch origin "$BRANCH"
@@ -53,14 +50,12 @@ fi
 cd "$REPO_DIR"
 cabal update
 
-# 4. cabal install --lib を使わず、cabal build を通して依存関係を正しく解決させる
-# （cabal.project があればそれを利用、なければ新規作成）
-if [ ! -f "cabal.project" ]; then
-  echo "packages: ." > cabal.project
-fi
+# 4. パッケージのインストール
+cabal install --lib OpenGL GLUT ALUT JuicyPixels vector random
 
-# 一度 cabal build を走らせて依存関係をすべてビルド・解決させる
-cabal build all
+# ★ここで重複登録された JuicyPixels の片方を無効化（hide）する、または GHC が迷わないようにする
+# ghc-pkg 経由で不要な方の登録を隠す、またはパッケージフラグを調整
+ghc-pkg hide JuicyPixels-3.3.9 --force || true
 
 # 5. Effekseer および Rayランタイムのビルド
 wget -q -O "$EFFEKSEER_ARCHIVE" \
@@ -71,19 +66,19 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-# 6. ビルド前の準備と実行
+# 6. ビルド設定
 rm -rf dist-newstyle/
+rm -f cabal.project
 
-# 競合を防ぐため、コンパイル時に明示的にパッケージを指定するか cabal run / cabal build を使うように build.sh を書き換える
-# （直接 ghc を叩くのをやめ、cabal 経由のビルドに置き換える）
-sed -i 's|ghc .* -lstdc++|cabal run -- +RTS -RTS|g' build.sh || true
+# 元の build.sh の ghc コマンドにパッケージの競合を防ぐオプション（-hide-all-packages などを避けて安全に）を指定
+sed -i 's/ghc -lstdc++/ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -package-id JuicyPixels-3.3.9 -lstdc++/g' build.sh
 
 export CPATH="/content/effekseer-install/include:/content/effekseer-install/include/Effekseer:/usr/include/freetype2:${CPATH:-}"
 
 echo "=== ビルド実行 ==="
 MONADIUS_COLAB_EGL=1 \
   EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" \
-  cabal build exe:Monadius
+  bash build.sh
 
 echo "=== 起動スクリプト実行 ==="
 bash Colab/fresh-start.sh
