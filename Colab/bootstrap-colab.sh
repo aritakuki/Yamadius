@@ -51,15 +51,7 @@ fi
 cd "$REPO_DIR"
 cabal update
 
-# 4. Haskellパッケージ環境の構築（vectorの余計な制約を排除）
-HASKELL_PACKAGE_ENV_DIR="$(mktemp -d /tmp/monadius-ghc-env.XXXXXX)"
-HASKELL_PACKAGE_ENV="$HASKELL_PACKAGE_ENV_DIR/environment"
-cabal install --lib --package-env="$HASKELL_PACKAGE_ENV" \
-  --constraint="GLUT < 2.8.2.0" \
-  --constraint="OpenGL < 3.0.4.0" \
-  OpenGL GLUT ALUT JuicyPixels vector random
-
-# 5. Effekseer および Rayランタイムのビルド
+# 4. Effekseer および Rayランタイムのビルド
 wget -q -O "$EFFEKSEER_ARCHIVE" \
   https://github.com/effekseer/Effekseer/releases/download/160e/EffekseerRuntime160e.zip
 mkdir -p "$EFFEKSEER_SOURCE"
@@ -68,7 +60,7 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-# 6. 今日実際に動いた手順の反映（git resetなし、dist-newstyle削除のみ）
+# 5. 今日手動で成功した手順の完全反映（余計な環境構築コマンドを一切排除）
 rm -rf dist-newstyle/
 
 # build.sh のコンパイルオプションにGHC文法チェック緩和を追加
@@ -78,8 +70,7 @@ sed -i 's/ghc -lstdc++/ghc -XNondecreasingIndentation -XFlexibleContexts -XOverl
 export CPATH="/content/effekseer-install/include:/content/effekseer-install/include/Effekseer:/usr/include/freetype2:${CPATH:-}"
 
 echo "=== ビルド実行 ==="
-GHC_ENVIRONMENT="$HASKELL_PACKAGE_ENV" \
-  MONADIUS_COLAB_EGL=1 \
+MONADIUS_COLAB_EGL=1 \
   EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" \
   bash build.sh
 
