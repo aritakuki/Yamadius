@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Monadius Google Colab Bootstrap Script (手動の完全再現版)
 set -euo pipefail
 
 REPO_DIR="${MONADIUS_REPO_DIR:-/content/Yamadius-colab}"
@@ -51,7 +50,7 @@ fi
 cd "$REPO_DIR"
 cabal update
 
-# 4. 【重要】手動と同じように、ここで確実にJuicyPixels等を使えるようにインストールする
+# 4. 手動で実行していたパッケージの導入
 cabal install --lib OpenGL GLUT ALUT JuicyPixels vector random
 
 # 5. Effekseer および Rayランタイムのビルド
@@ -63,13 +62,10 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-# 6. ビルド設定
+# 6. 手動のときと同じビルド前の準備と実行
 rm -rf dist-newstyle/
+sed -i 's/ghc -lstdc++/cabal exec -- ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -lstdc++/g' build.sh
 
-# build.sh のコンパイルオプションにGHC文法チェック緩和を追加
-sed -i 's/ghc -lstdc++/ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -lstdc++/g' build.sh
-
-# 手動と同じ CPATH の指定
 export CPATH="/content/effekseer-install/include:/content/effekseer-install/include/Effekseer:/usr/include/freetype2:${CPATH:-}"
 
 echo "=== ビルド実行 ==="
