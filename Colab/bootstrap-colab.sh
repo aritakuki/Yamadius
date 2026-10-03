@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild a fresh Google Colab runtime and start Monadius on NVIDIA EGL.
+# Monadius Google Colab Bootstrap Script (今日成功した完全再現版)
 set -euo pipefail
 
 REPO_DIR="${MONADIUS_REPO_DIR:-/content/Yamadius-colab}"
@@ -60,7 +60,7 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-# 5. 今日手動で成功した手順の完全反映（余計な環境構築コマンドを一切排除）
+# 5. 今日手動で成功した手順をそのまま実行（余計な環境構築を一切しない）
 rm -rf dist-newstyle/
 
 # build.sh のコンパイルオプションにGHC文法チェック緩和を追加
