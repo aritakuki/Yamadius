@@ -51,13 +51,12 @@ fi
 cd "$REPO_DIR"
 cabal update
 
-# 4. Haskellパッケージ環境の構築
+# 4. Haskellパッケージ環境の構築（vectorの余計な制約を排除）
 HASKELL_PACKAGE_ENV_DIR="$(mktemp -d /tmp/monadius-ghc-env.XXXXXX)"
 HASKELL_PACKAGE_ENV="$HASKELL_PACKAGE_ENV_DIR/environment"
 cabal install --lib --package-env="$HASKELL_PACKAGE_ENV" \
   --constraint="GLUT < 2.8.2.0" \
   --constraint="OpenGL < 3.0.4.0" \
-  --constraint="vector < 0.13.2.0" \
   OpenGL GLUT ALUT JuicyPixels vector random
 
 # 5. Effekseer および Rayランタイムのビルド
@@ -69,7 +68,7 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-# 6. 今日実際に動いた手順のそのままの反映（git resetなし、dist-newstyle削除のみ）
+# 6. 今日実際に動いた手順の反映（git resetなし、dist-newstyle削除のみ）
 rm -rf dist-newstyle/
 
 # build.sh のコンパイルオプションにGHC文法チェック緩和を追加
