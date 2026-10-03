@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 # Rebuild a fresh Google Colab runtime and start Monadius on NVIDIA EGL.
-#
-# From an empty Colab runtime, run this file directly from GitHub:
-# curl -fsSL https://raw.githubusercontent.com/aritakuki/Yamadius/main/Colab/bootstrap-colab.sh | bash
 set -euo pipefail
 
 REPO_DIR="${MONADIUS_REPO_DIR:-/content/Yamadius-colab}"
@@ -16,7 +13,7 @@ EFFEKSEER_ARCHIVE="/content/EffekseerRuntime160e.zip"
 EFFEKSEER_SOURCE="/content/EffekseerRuntime160e"
 EFFEKSEER_PREFIX="/content/effekseer-install"
 
-# 0. 必要なシステムパッケージのインストール
+# 1. システムパッケージのインストール
 apt-get -qq update
 apt-get -qq install -y \
   git wget unzip cmake build-essential \
@@ -27,14 +24,14 @@ apt-get -qq install -y \
   libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libxcursor-dev \
   ghc cabal-install sbcl libffi-dev
 
-# 1. Cabalの署名・リポジトリエラー対策
+# 2. Cabalのセキュリティ・署名対策
 mkdir -p /root/.cabal
 echo "active-repositories: hackage.haskell.org:override" > /root/.cabal/config
 echo "repository hackage.haskell.org" >> /root/.cabal/config
 echo "  url: http://hackage.haskell.org/" >> /root/.cabal/config
 echo "  secure: False" >> /root/.cabal/config
 
-# 2. リポジトリのクローンまたは最新化
+# 3. リポジトリのクローン・更新
 if [[ -d "$REPO_DIR/.git" ]]; then
   git -C "$REPO_DIR" fetch origin "$BRANCH"
   git -C "$REPO_DIR" switch "$BRANCH"
@@ -54,7 +51,7 @@ fi
 cd "$REPO_DIR"
 cabal update
 
-# 3. 依存パッケージのバージョン制約を指定してプライベートなGHC環境を構築
+# 4. Haskellパッケージ環境の構築
 HASKELL_PACKAGE_ENV_DIR="$(mktemp -d /tmp/monadius-ghc-env.XXXXXX)"
 HASKELL_PACKAGE_ENV="$HASKELL_PACKAGE_ENV_DIR/environment"
 cabal install --lib --package-env="$HASKELL_PACKAGE_ENV" \
@@ -63,7 +60,7 @@ cabal install --lib --package-env="$HASKELL_PACKAGE_ENV" \
   --constraint="vector < 0.13.2.0" \
   OpenGL GLUT ALUT JuicyPixels vector random
 
-# 4. EffekseerおよびLisp背景ランタイムのビルド・準備
+# 5. Effekseer および Rayランタイムのビルド
 wget -q -O "$EFFEKSEER_ARCHIVE" \
   https://github.com/effekseer/Effekseer/releases/download/160e/EffekseerRuntime160e.zip
 mkdir -p "$EFFEKSEER_SOURCE"
@@ -72,15 +69,12 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-# 5. 完全に動いた実績のある手順を反映（クリーンリセット ＋ GHC文法緩和オプション追加 ＋ CPATH指定）
-git reset --hard HEAD
-git clean -fd
-
+# 6. 今日実際に動いた手順の反映（git resetなし、GHCオプション追加、CPATH設定、build.sh実行）
 sed -i 's/ghc -lstdc++/ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -lstdc++/g' build.sh
 
 export CPATH="/content/effekseer-install/include:/content/effekseer-install/include/Effekseer:/usr/include/freetype2:${CPATH:-}"
 
-echo "=== オリジナル状態からのクリーンビルド ==="
+echo "=== クリーンビルド実行 ==="
 GHC_ENVIRONMENT="$HASKELL_PACKAGE_ENV" \
   MONADIUS_COLAB_EGL=1 \
   EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" \
