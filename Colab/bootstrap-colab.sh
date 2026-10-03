@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild a fresh Google Colab runtime and start Monadius on NVIDIA EGL.
+# Monadius Google Colab Bootstrap Script (手動の完全再現版)
 set -euo pipefail
 
 REPO_DIR="${MONADIUS_REPO_DIR:-/content/Yamadius-colab}"
@@ -51,7 +51,7 @@ fi
 cd "$REPO_DIR"
 cabal update
 
-# 4. 必要なパッケージをグローバル（またはユーザー領域）に安全にインストールしてJuicyPixels等を使えるようにする
+# 4. 【重要】手動と同じように、ここで確実にJuicyPixels等を使えるようにインストールする
 cabal install --lib OpenGL GLUT ALUT JuicyPixels vector random
 
 # 5. Effekseer および Rayランタイムのビルド
@@ -63,13 +63,13 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-# 6. ビルド前の設定
+# 6. ビルド設定
 rm -rf dist-newstyle/
 
 # build.sh のコンパイルオプションにGHC文法チェック緩和を追加
 sed -i 's/ghc -lstdc++/ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -lstdc++/g' build.sh
 
-# 手動で通ったのと同じ CPATH を指定
+# 手動と同じ CPATH の指定
 export CPATH="/content/effekseer-install/include:/content/effekseer-install/include/Effekseer:/usr/include/freetype2:${CPATH:-}"
 
 echo "=== ビルド実行 ==="
