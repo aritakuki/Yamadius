@@ -30,7 +30,7 @@ echo "repository hackage.haskell.org" >> /root/.cabal/config
 echo "  url: http://hackage.haskell.org/" >> /root/.cabal/config
 echo "  secure: False" >> /root/.cabal/config
 
-# ★ 重複パッケージの競合を防ぐため、既存のGHC環境ファイルを完全にリセットする
+# 環境のクリーンアップ
 rm -rf /root/.ghc/x86_64-linux-*
 
 # 3. リポジトリのクローン・更新
@@ -53,8 +53,14 @@ fi
 cd "$REPO_DIR"
 cabal update
 
-# 4. パッケージのインストール（クリーンな状態から1回だけ実行）
-cabal install --lib OpenGL GLUT ALUT JuicyPixels vector random
+# 4. cabal install --lib を使わず、cabal build を通して依存関係を正しく解決させる
+# （cabal.project があればそれを利用、なければ新規作成）
+if [ ! -f "cabal.project" ]; then
+  echo "packages: ." > cabal.project
+fi
+
+# 一度 cabal build を走らせて依存関係をすべてビルド・解決させる
+cabal build all
 
 # 5. Effekseer および Rayランタイムのビルド
 wget -q -O "$EFFEKSEER_ARCHIVE" \
@@ -67,14 +73,17 @@ bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX
 
 # 6. ビルド前の準備と実行
 rm -rf dist-newstyle/
-sed -i 's/ghc -lstdc++/cabal exec -- ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -lstdc++/g' build.sh
+
+# 競合を防ぐため、コンパイル時に明示的にパッケージを指定するか cabal run / cabal build を使うように build.sh を書き換える
+# （直接 ghc を叩くのをやめ、cabal 経由のビルドに置き換える）
+sed -i 's|ghc .* -lstdc++|cabal run -- +RTS -RTS|g' build.sh || true
 
 export CPATH="/content/effekseer-install/include:/content/effekseer-install/include/Effekseer:/usr/include/freetype2:${CPATH:-}"
 
 echo "=== ビルド実行 ==="
 MONADIUS_COLAB_EGL=1 \
   EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" \
-  bash build.sh
+  cabal build exe:Monadius
 
 echo "=== 起動スクリプト実行 ==="
 bash Colab/fresh-start.sh
