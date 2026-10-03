@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ==============================================================================
+# Monadius (Yamadius) - まっさらな環境用 完全ビルド＆起動スクリプト
+# 明日、新しい環境で上からそのまま実行してください。
+# ==============================================================================
+
 REPO_DIR="${MONADIUS_REPO_DIR:-/content/Yamadius-colab}"
 BRANCH="${MONADIUS_BRANCH:-main}"
 REPOSITORY_URL="${MONADIUS_REPOSITORY_URL:-https://github.com/aritakuki/Yamadius.git}"
@@ -12,7 +17,7 @@ EFFEKSEER_ARCHIVE="/content/EffekseerRuntime160e.zip"
 EFFEKSEER_SOURCE="/content/EffekseerRuntime160e"
 EFFEKSEER_PREFIX="/content/effekseer-install"
 
-# 1. システムパッケージのインストール
+echo "=== [1/7] システムパッケージのインストール ==="
 apt-get -qq update
 apt-get -qq install -y \
   git wget unzip cmake build-essential \
@@ -23,41 +28,29 @@ apt-get -qq install -y \
   libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libxcursor-dev \
   ghc cabal-install sbcl libffi-dev
 
-# 2. Cabalの設定
+echo "=== [2/7] Cabal / GHC 環境の完全クリーンアップ ==="
+# まっさらな状態を保証するため、既存のキャッシュや登録情報をすべてクリア
+rm -rf /root/.cabal /root/.ghc
+
 mkdir -p /root/.cabal
 echo "active-repositories: hackage.haskell.org:override" > /root/.cabal/config
 echo "repository hackage.haskell.org" >> /root/.cabal/config
 echo "  url: http://hackage.haskell.org/" >> /root/.cabal/config
 echo "  secure: False" >> /root/.cabal/config
 
-# 3. リポジトリのクローン・更新
-if [[ -d "$REPO_DIR/.git" ]]; then
-  git -C "$REPO_DIR" fetch origin "$BRANCH"
-  git -C "$REPO_DIR" switch "$BRANCH"
-  git -C "$REPO_DIR" pull --ff-only
-else
-  git clone --branch "$BRANCH" "$REPOSITORY_URL" "$REPO_DIR"
-fi
-
-if [[ -d "$LISP_REPO_DIR/.git" ]]; then
-  git -C "$LISP_REPO_DIR" fetch origin "$LISP_BRANCH"
-  git -C "$LISP_REPO_DIR" switch "$LISP_BRANCH"
-  git -C "$LISP_REPO_DIR" pull --ff-only
-else
-  git clone --branch "$LISP_BRANCH" "$LISP_REPOSITORY_URL" "$LISP_REPO_DIR"
-fi
+echo "=== [3/7] リポジトリのクローン ==="
+rm -rf "$REPO_DIR" "$LISP_REPO_DIR"
+git clone --branch "$BRANCH" "$REPOSITORY_URL" "$REPO_DIR"
+git clone --branch "$LISP_BRANCH" "$LISP_REPOSITORY_URL" "$LISP_REPO_DIR"
 
 cd "$REPO_DIR"
 cabal update
 
-# 4. パッケージのインストール
+echo "=== [4/7] 依存 Haskell パッケージのインストール ==="
+# まっさらな状態なので重複エラーを起こさずにクリーンに導入されます
 cabal install --lib OpenGL GLUT ALUT JuicyPixels vector random
 
-# ★ここで重複登録された JuicyPixels の片方を無効化（hide）する、または GHC が迷わないようにする
-# ghc-pkg 経由で不要な方の登録を隠す、またはパッケージフラグを調整
-ghc-pkg hide JuicyPixels-3.3.9 --force || true
-
-# 5. Effekseer および Rayランタイムのビルド
+echo "=== [5/7] Effekseer および Rayランタイムのビルド ==="
 wget -q -O "$EFFEKSEER_ARCHIVE" \
   https://github.com/effekseer/Effekseer/releases/download/160e/EffekseerRuntime160e.zip
 mkdir -p "$EFFEKSEER_SOURCE"
@@ -66,27 +59,23 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-# 6. ビルド設定
-rm -rf dist-newstyle/
-rm -f cabal.project
-
-# 元の build.sh の ghc コマンドにパッケージの競合を防ぐオプション（-hide-all-packages などを避けて安全に）を指定
-sed -i 's/ghc -lstdc++/ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -package-id JuicyPixels-3.3.9 -lstdc++/g' build.sh
-
+echo "=== [6/7] ゲーム本体のビルド実行 ==="
 export CPATH="/content/effekseer-install/include:/content/effekseer-install/include/Effekseer:/usr/include/freetype2:${CPATH:-}"
 
-echo "=== ビルド実行 ==="
 MONADIUS_COLAB_EGL=1 \
   EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" \
   bash build.sh
 
-echo "=== 起動スクリプト実行 ==="
+echo "=== [7/7] 起動スクリプト実行 ==="
 bash Colab/fresh-start.sh
 
 cat <<'EOF'
 
-Monadius is running.  To embed the game in a Colab output, execute:
+==============================================================================
+Monadius is running successfully!
+To embed the game in a Colab output, execute the following Python snippet:
 
 from google.colab import output
 output.serve_kernel_port_as_iframe(8765, height=1100)
+==============================================================================
 EOF
