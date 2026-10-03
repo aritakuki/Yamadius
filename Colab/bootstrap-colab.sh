@@ -61,6 +61,11 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
+
+# GHCのバージョンアップ（GHC 9.4等）による厳格なインデントやパースエラーを回避するため、
+# ビルドスクリプト側で文法チェックを緩和するオプションを適用してビルドする
+sed -i 's/ghc -lstdc++/ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -lstdc++/g' build.sh
+
 GHC_ENVIRONMENT="$HASKELL_PACKAGE_ENV" \
   MONADIUS_COLAB_EGL=1 EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" bash build.sh
 bash Colab/fresh-start.sh
