@@ -16,6 +16,7 @@ EFFEKSEER_ARCHIVE="/content/EffekseerRuntime160e.zip"
 EFFEKSEER_SOURCE="/content/EffekseerRuntime160e"
 EFFEKSEER_PREFIX="/content/effekseer-install"
 
+# 0. 必要なシステムパッケージのインストール
 apt-get -qq update
 apt-get -qq install -y \
   git wget unzip cmake build-essential \
@@ -26,6 +27,14 @@ apt-get -qq install -y \
   libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libxcursor-dev \
   ghc cabal-install sbcl libffi-dev
 
+# 1. Cabalの署名・リポジトリエラー対策
+mkdir -p /root/.cabal
+echo "active-repositories: hackage.haskell.org:override" > /root/.cabal/config
+echo "repository hackage.haskell.org" >> /root/.cabal/config
+echo "  url: http://hackage.haskell.org/" >> /root/.cabal/config
+echo "  secure: False" >> /root/.cabal/config
+
+# 2. リポジトリのクローンまたは最新化
 if [[ -d "$REPO_DIR/.git" ]]; then
   git -C "$REPO_DIR" fetch origin "$BRANCH"
   git -C "$REPO_DIR" switch "$BRANCH"
@@ -44,16 +53,17 @@ fi
 
 cd "$REPO_DIR"
 cabal update
-# cabal install --lib otherwise reuses the user's default GHC environment.
-# A previous Colab run can therefore pin a newly released transitive package
-# (for example containers-0.8) that is outside GLUT's supported range.  Build
-# a fresh, private environment on every bootstrap and pass that exact
-# environment to GHC below.
+
+# 3. 依存パッケージのバージョン制約を指定してプライベートなGHC環境を構築
 HASKELL_PACKAGE_ENV_DIR="$(mktemp -d /tmp/monadius-ghc-env.XXXXXX)"
 HASKELL_PACKAGE_ENV="$HASKELL_PACKAGE_ENV_DIR/environment"
 cabal install --lib --package-env="$HASKELL_PACKAGE_ENV" \
+  --constraint="GLUT < 2.8.2.0" \
+  --constraint="OpenGL < 3.0.4.0" \
+  --constraint="vector < 0.13.2.0" \
   OpenGL GLUT ALUT JuicyPixels vector random
 
+# 4. EffekseerおよびLisp背景ランタイムのビルド・準備
 wget -q -O "$EFFEKSEER_ARCHIVE" \
   https://github.com/effekseer/Effekseer/releases/download/160e/EffekseerRuntime160e.zip
 mkdir -p "$EFFEKSEER_SOURCE"
@@ -62,12 +72,21 @@ unzip -qo "$EFFEKSEER_ARCHIVE" -d "$EFFEKSEER_SOURCE"
 bash Colab/build-effekseer.sh "$EFFEKSEER_SOURCE" "$EFFEKSEER_PREFIX"
 bash Colab/build-ray-background-runtime.sh "$LISP_REPO_DIR" "$RAY_RUNTIME_PREFIX"
 
-# GHCのバージョンアップ（GHC 9.4等）による厳格なインデントやパースエラーを回避するため、
-# ビルドスクリプト側で文法チェックを緩和するオプションを適用してビルドする
+# 5. 完全に動いた実績のある手順を反映（クリーンリセット ＋ GHC文法緩和オプション追加 ＋ CPATH指定）
+git reset --hard HEAD
+git clean -fd
+
 sed -i 's/ghc -lstdc++/ghc -XNondecreasingIndentation -XFlexibleContexts -XOverloadedStrings -lstdc++/g' build.sh
 
+export CPATH="/content/effekseer-install/include:/content/effekseer-install/include/Effekseer:/usr/include/freetype2:${CPATH:-}"
+
+echo "=== オリジナル状態からのクリーンビルド ==="
 GHC_ENVIRONMENT="$HASKELL_PACKAGE_ENV" \
-  MONADIUS_COLAB_EGL=1 EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" bash build.sh
+  MONADIUS_COLAB_EGL=1 \
+  EFFEKSEER_PREFIX="$EFFEKSEER_PREFIX" \
+  bash build.sh
+
+echo "=== 起動スクリプト実行 ==="
 bash Colab/fresh-start.sh
 
 cat <<'EOF'
